@@ -36,6 +36,16 @@ export default function App() {
     localStorage.setItem('appvro-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
+  // ── Text overlay state ───────────────────────────────────────────────
+  const [showOverlaySettings, setShowOverlaySettings] = useState(false);
+  const [overlayEnabled, setOverlayEnabled] = useState(true);
+  const [overlayText, setOverlayText] = useState('✦ AppVro Studio  ✦  សូមស្វាគមន៍');
+  const [overlayFontSize, setOverlayFontSize] = useState(28); // px, default medium
+  const [overlayColor, setOverlayColor] = useState('#ffffff');
+  const [overlayDirection, setOverlayDirection] = useState('bottom-to-top'); // 'bottom-to-top' | 'top-to-bottom'
+  const [overlaySpeed, setOverlaySpeed] = useState(5); // 1 (slow) – 10 (fast)
+  const [overlayOpacity, setOverlayOpacity] = useState(1.0); // 0.1 – 1.0
+
   // ── Video state ──────────────────────────────────────────────────────
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
@@ -328,20 +338,13 @@ export default function App() {
                 </svg>
               )}
             </button>
-            <button
-              className="topbar-btn settings-btn"
-              onClick={() => alert('Settings panel coming soon!')}
-              title="Settings"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
+
           </div>
           <span className="topbar-version">v1.0.0</span>
         </div>
       </header>
+
+
 
       {/* Main studio layout */}
       <div className="studio-main">
@@ -374,6 +377,118 @@ export default function App() {
               onCaptionsGenerated={handleCaptionsGenerated}
               disabled={!videoFile || isMerging}
             />
+          </div>
+
+          {/* ── Text Editor Section (below Auto-Caption) ──────────────── */}
+          <div className="sidebar-section text-editor-section">
+            <button
+              className="text-editor-toggle-btn"
+              onClick={() => setShowOverlaySettings(prev => !prev)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+              <span>Text Editor</span>
+              <svg
+                className={`text-editor-chevron${showOverlaySettings ? ' open' : ''}`}
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+
+            <div className={`text-editor-panel${showOverlaySettings ? ' open' : ''}`}>
+              <div className="text-editor-input-row">
+                <input
+                  type="text"
+                  className="text-editor-input"
+                  value={overlayText}
+                  onChange={e => setOverlayText(e.target.value)}
+                  placeholder="Overlay text…"
+                />
+              </div>
+
+              <div className="text-editor-row">
+                <label className="text-editor-label">
+                  <span>Size</span>
+                  <input
+                    type="range"
+                    className="text-editor-slider"
+                    min={12}
+                    max={72}
+                    value={overlayFontSize}
+                    onChange={e => setOverlayFontSize(Number(e.target.value))}
+                  />
+                  <span className="text-editor-value">{overlayFontSize}px</span>
+                </label>
+                <label className="text-editor-label">
+                  <span>Speed</span>
+                  <input
+                    type="range"
+                    className="text-editor-slider"
+                    min={1}
+                    max={10}
+                    value={overlaySpeed}
+                    onChange={e => setOverlaySpeed(Number(e.target.value))}
+                  />
+                  <span className="text-editor-value">{['Slow','Moderate','Fast','V.Fast'][Math.min(Math.floor((overlaySpeed-1)/2.25),3)]}</span>
+                </label>
+              </div>
+
+              <div className="text-editor-row">
+                <label className="text-editor-label">
+                  <span>Opacity</span>
+                  <input
+                    type="range"
+                    className="text-editor-slider"
+                    min={0.1}
+                    max={1.0}
+                    step={0.05}
+                    value={overlayOpacity}
+                    onChange={e => setOverlayOpacity(Number(e.target.value))}
+                  />
+                  <span className="text-editor-value">{Math.round(overlayOpacity * 100)}%</span>
+                </label>
+                <label className="text-editor-label">
+                  <span>Direction</span>
+                  <select
+                    className="text-editor-select"
+                    value={overlayDirection}
+                    onChange={e => setOverlayDirection(e.target.value)}
+                  >
+                    <option value="bottom-to-top">↑ Bottom→Top</option>
+                    <option value="top-to-bottom">↓ Top→Bottom</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="text-editor-inline-row">
+                <label className="text-editor-inline-label">
+                  <span>Color</span>
+                  <input
+                    type="color"
+                    className="text-editor-color"
+                    value={overlayColor}
+                    onChange={e => setOverlayColor(e.target.value)}
+                  />
+                </label>
+                <label className="text-editor-inline-label text-editor-check-label">
+                  <input
+                    type="checkbox"
+                    checked={overlayEnabled}
+                    onChange={e => setOverlayEnabled(e.target.checked)}
+                  />
+                  <span>Active</span>
+                </label>
+              </div>
+            </div>
           </div>
 
           {/* ── Auto-Translate Section ──────────────────────────── */}
@@ -544,6 +659,12 @@ export default function App() {
               logoOpacity={logoOpacity}
               onLogoPositionChange={setLogoPositionCustom}
               onLogoSizeChange={setLogoSize}
+              overlayText={overlayEnabled ? overlayText : ''}
+              overlayFontSize={overlayFontSize}
+              overlayColor={overlayColor}
+              overlayDirection={overlayDirection}
+              overlaySpeed={overlaySpeed}
+              overlayOpacity={overlayOpacity}
             />
           </div>
 
@@ -559,23 +680,45 @@ export default function App() {
         </div>
       </div>
 
-      {/* Bottom status bar */}
+      {/* Bottom status bar — vertical scrolling marquee */}
       <footer className="studio-statusbar">
-        <span className="status-left">
-          {segments.length > 0
-            ? `${segments.length} segments loaded`
-            : 'No segments loaded'}
-        </span>
-        <span className="status-center">
-          {isPlaying && currentSegmentIndex >= 0
-            ? `Playing segment ${currentSegmentIndex + 1}`
-            : isPlaying
-            ? 'Playing'
-            : 'Ready'}
-        </span>
-        <span className="status-right">
-          Audio: {formatDuration(totalDuration)}
-        </span>
+        <div className="marquee-vertical-track">
+          {/* Duplicated content for seamless looping */}
+          <div className="marquee-vertical-content">
+            <span>
+              {segments.length > 0
+                ? `${segments.length} segments loaded`
+                : 'No segments loaded'}
+              &nbsp;&middot;&nbsp;
+              {isPlaying && currentSegmentIndex >= 0
+                ? `Playing segment ${currentSegmentIndex + 1}`
+                : isPlaying
+                ? 'Playing'
+                : 'Ready'}
+              &nbsp;&middot;&nbsp;
+              {totalDuration > 0 ? `Audio: ${formatDuration(totalDuration)}` : ''}
+              &nbsp;&middot;&nbsp;
+              {darkMode ? 'Dark Mode' : 'Light Mode'}
+            </span>
+          </div>
+          <div className="marquee-vertical-content" aria-hidden="true">
+            <span>
+              {segments.length > 0
+                ? `${segments.length} segments loaded`
+                : 'No segments loaded'}
+              &nbsp;&middot;&nbsp;
+              {isPlaying && currentSegmentIndex >= 0
+                ? `Playing segment ${currentSegmentIndex + 1}`
+                : isPlaying
+                ? 'Playing'
+                : 'Ready'}
+              &nbsp;&middot;&nbsp;
+              {totalDuration > 0 ? `Audio: ${formatDuration(totalDuration)}` : ''}
+              &nbsp;&middot;&nbsp;
+              {darkMode ? 'Dark Mode' : 'Light Mode'}
+            </span>
+          </div>
+        </div>
       </footer>
     </div>
   );

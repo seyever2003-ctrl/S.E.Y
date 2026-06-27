@@ -17,6 +17,12 @@ export default function VideoPlayerWithLogo({
   logoOpacity = 0.85,
   onLogoPositionChange,
   onLogoSizeChange,
+  overlayText = '',
+  overlayFontSize = 28,
+  overlayColor = '#ffffff',
+  overlayDirection = 'bottom-to-top',
+  overlaySpeed = 5,
+  overlayOpacity = 1.0,
 }) {
   const stageRef = useRef(null);
   const videoRef = useRef(null);
@@ -298,6 +304,34 @@ export default function VideoPlayerWithLogo({
             <span className="logo-resize-handle logo-resize-se" data-handle="se" onMouseDown={handleResizeStart} />
           </div>
         )}
+
+        {/* ── Scrolling text overlay (sequential, non-overlapping) ──────── */}
+        {overlayText && (() => {
+          // Map speed (1-10) → animation duration in seconds.
+          // Speed 1 ≈ 40s, speed 5 ≈ 20s (moderate), speed 10 ≈ 8s.
+          const duration = 44 - overlaySpeed * 3.6;
+          const dirClass = overlayDirection === 'top-to-bottom'
+            ? 'text-scroll-down'
+            : 'text-scroll-up';
+          return (
+            <div
+              className="text-scroll-overlay"
+              aria-live="off"
+              style={{ opacity: overlayOpacity }}
+            >
+              <div
+                className={`text-scroll-content ${dirClass}`}
+                style={{
+                  fontSize: overlayFontSize,
+                  color: overlayColor,
+                  animationDuration: `${duration}s`,
+                }}
+              >
+                {overlayText}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Custom Control Bar ──────────────────────────────────────────── */}

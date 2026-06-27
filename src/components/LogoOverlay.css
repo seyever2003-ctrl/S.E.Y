@@ -410,6 +410,100 @@
   color: var(--text-muted);
 }
 
+/* ── Scrolling text overlay (sequential, non-overlapping) ────────────── */
+
+.text-scroll-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+  z-index: 15;
+  pointer-events: none; /* let clicks pass through */
+}
+
+.text-scroll-content {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  width: 90%;
+  margin: 0 auto;
+  font-weight: 700;
+  font-family: var(--font-mono), 'Leelawadee UI', 'Nirmala UI', 'Khmer UI', 'DaunPenh', 'Noto Sans Khmer', sans-serif;
+  text-shadow:
+    0 0 10px rgba(0, 0, 0, 0.8),
+    0 0 30px rgba(0, 0, 0, 0.6),
+    0 2px 4px rgba(0, 0, 0, 0.5);
+  line-height: 1.4;
+  word-break: break-word;
+  padding: 0 5%;
+  will-change: transform;
+  /* animation-name + animation-duration set via class + inline style */
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Top → Bottom — text enters from above, scrolls down, exits below
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.text-scroll-down {
+  animation-name: scroll-seq-down;
+}
+
+@keyframes scroll-seq-down {
+  /* starts off-screen above */
+  0% {
+    top: -15%;
+    opacity: 0;
+  }
+  /* fades in as it enters the frame */
+  6% {
+    opacity: 1;
+  }
+  /* travels through the visible area */
+  94% {
+    opacity: 1;
+  }
+  /* fades out as it exits below */
+  100% {
+    top: 115%;
+    opacity: 0;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Bottom → Top — text enters from below, scrolls up, exits above
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.text-scroll-up {
+  animation-name: scroll-seq-up;
+}
+
+@keyframes scroll-seq-up {
+  /* starts off-screen below */
+  0% {
+    top: 115%;
+    opacity: 0;
+  }
+  /* fades in as it enters the frame */
+  6% {
+    opacity: 1;
+  }
+  /* travels through the visible area */
+  94% {
+    opacity: 1;
+  }
+  /* fades out as it exits above */
+  100% {
+    top: -15%;
+    opacity: 0;
+  }
+}
+
 /* ── Video Player With Logo (left-side host) ───────────────────────────── */
 
 .video-player-with-logo {
