@@ -86,6 +86,7 @@ export default function App() {
   const [mergeResult, setMergeResult] = useState(null);
   const [mergeError, setMergeError] = useState('');
 
+  const [currentTime, setCurrentTime] = useState(0);
   const seekToRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -149,6 +150,41 @@ export default function App() {
     setMergeLog('');
     setMergeProgress(0);
   }, [videoPreviewUrl]);
+
+  // ── Timeline (drag-and-drop video onto timeline) ──────────────────
+  const captionPanelRef = useRef(null);
+
+  const handleVideoDrop = useCallback((file) => {
+    const url = URL.createObjectURL(file);
+    handleVideoLoaded(file, url);
+
+    // Probe video duration for immediate timeline display.
+    // Use a SEPARATE blob URL for probing so we don't revoke the preview URL.
+    const probeUrl = URL.createObjectURL(file);
+    const videoEl = document.createElement('video');
+    videoEl.preload = 'metadata';
+    videoEl.onloadedmetadata = () => {
+      setTotalDuration(videoEl.duration);
+      videoEl.remove();
+      URL.revokeObjectURL(probeUrl);
+    };
+    videoEl.onerror = () => {
+      // Fallback: estimate duration from file size (rough)
+      setTotalDuration(120);
+      videoEl.remove();
+      URL.revokeObjectURL(probeUrl);
+    };
+    videoEl.src = probeUrl;
+
+    // Auto-trigger caption generation after a short delay (to let UI settle)
+    setTimeout(() => {
+      captionPanelRef.current?.startCaptions();
+    }, 300);
+  }, [handleVideoLoaded]);
+
+  const handleTimelineTimeUpdate = useCallback((time) => {
+    setCurrentTime(time);
+  }, []);
 
   // ── Auto-Caption (Local STT + Translate to Khmer) ─────────────────────
   const handleCaptionsGenerated = useCallback((segments) => {
@@ -400,6 +436,7 @@ export default function App() {
               Auto-Caption
             </h3>
             <CaptionPanel
+              ref={captionPanelRef}
               videoFile={videoFile}
               onCaptionsGenerated={handleCaptionsGenerated}
               disabled={!videoFile || isMerging}
@@ -706,6 +743,12 @@ export default function App() {
               currentSegmentIndex={currentSegmentIndex}
               onSegmentClick={handleTimelineSegmentClick}
               totalDuration={totalDuration}
+              videoFile={videoFile}
+              videoPreviewUrl={videoPreviewUrl}
+              ttsAudioBuffers={ttsAudioBuffers}
+              currentTime={currentTime}
+              onVideoDrop={handleVideoDrop}
+              onTimeUpdate={handleTimelineTimeUpdate}
             />
           </div>
         </div>

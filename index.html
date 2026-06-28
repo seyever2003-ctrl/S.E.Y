@@ -18,6 +18,15 @@
   </head>
   <body>
     <div id="root"></div>
+    <div id="runtime-error" style="display:none;position:fixed;inset:0;background:#0d0d0f;color:#e8e8ef;font-family:monospace;padding:40px;z-index:9999;overflow:auto;">
+      <h2 style="color:#ef4444;font-size:18px;margin-bottom:12px;">🚨 Application Error</h2>
+      <p style="color:#9899a8;font-size:13px;margin-bottom:16px;">Check the console (<strong>F12 → Console</strong>) for details.</p>
+      <div style="background:#1c1d23;border:1px solid #ef4444;border-radius:8px;padding:20px;">
+        <p class="error-message" style="color:#ef4444;font-size:13px;margin-bottom:8px;font-weight:600;"></p>
+        <pre class="error-stack" style="font-size:11px;color:#6a6b7a;line-height:1.6;white-space:pre-wrap;word-break:break-all;"></pre>
+      </div>
+      <button onclick="location.reload()" style="margin-top:16px;padding:10px 24px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;">Reload</button>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -1,11 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 
 /**
  * CaptionPanel — DeepSeek-Powered Auto-Caption
  * Uses browser-native SpeechRecognition + DeepSeek API for transcription & Khmer translation.
  * API key is managed by the Settings panel in App.jsx and received via props.
  */
-export default function CaptionPanel({ videoFile, onCaptionsGenerated, disabled, deepSeekApiKey, deepgramApiKey }) {
+const CaptionPanel = forwardRef(function CaptionPanel({ videoFile, onCaptionsGenerated, disabled, deepSeekApiKey, deepgramApiKey }, ref) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [log, setLog] = useState('');
@@ -57,6 +57,14 @@ export default function CaptionPanel({ videoFile, onCaptionsGenerated, disabled,
       console.log('[CaptionPanel] Processing finished (isProcessing = false)');
     }
   }, [videoFile, onCaptionsGenerated, addLog, apiKey]);
+
+  // Expose startCaptions() so the parent can auto-trigger on video drop
+  // NOTE: handleStart must be defined BEFORE this call
+  useImperativeHandle(ref, () => ({
+    startCaptions: () => {
+      if (!isProcessing && videoFile) handleStart();
+    },
+  }), [isProcessing, videoFile, handleStart]);
 
   var progressPct = Math.round(progress * 100);
 
@@ -114,6 +122,8 @@ export default function CaptionPanel({ videoFile, onCaptionsGenerated, disabled,
       )}
     </div>
   );
-}
+});
+
+export default CaptionPanel;
 
 
