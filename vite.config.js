@@ -12,19 +12,20 @@ export default defineConfig({
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',
-      'Content-Security-Policy':
-        "default-src 'self';" +
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://huggingface.co https://unpkg.com; " +
-        "worker-src 'self' blob: https://huggingface.co https://unpkg.com; " +
-        "style-src 'self' 'unsafe-inline'; " +
-        "connect-src 'self' blob: data: " +
-          "https://huggingface.co https://unpkg.com " +
-          "https://api.openai.com https://generativelanguage.googleapis.com " +
-          "https://texttospeech.googleapis.com https://storage.googleapis.com " +
-          "https://www.googleapis.com https://api.deepseek.com wss://*; " +
-        "img-src 'self' blob: data: https://huggingface.co; " +
-        "media-src 'self' blob:; " +
-        "font-src 'self' data:;",
+        'Content-Security-Policy':
+          "default-src 'self';" +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://huggingface.co https://unpkg.com https://cdn.jsdelivr.net; " +
+          "worker-src 'self' blob: data: https://huggingface.co https://unpkg.com https://cdn.jsdelivr.net; " +
+          "style-src 'self' 'unsafe-inline'; " +
+          "connect-src 'self' blob: data: " +
+            "https://huggingface.co https://unpkg.com https://cdn.jsdelivr.net " +
+            "https://api.openai.com https://generativelanguage.googleapis.com " +
+            "https://texttospeech.googleapis.com https://storage.googleapis.com " +
+            "https://www.googleapis.com https://api.deepseek.com wss://*; " +
+          "img-src 'self' blob: data: https://huggingface.co; " +
+          "media-src 'self' blob: data:; " +
+          "font-src 'self' data:; " +
+          "child-src 'self' blob: data:;",
     },
     proxy: {
       '/api/tts': {

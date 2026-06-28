@@ -49,6 +49,7 @@ export default function VideoPlayerWithLogo({
   const retryCountRef = useRef(0);      // tracks retry attempts
   const retryTimerRef = useRef(null);   // holds setTimeout for retry
   const subtitlesRef = useRef([]);      // latest subtitles (avoids re-attaching events on every change)
+  const retryFnRef = useRef(null);       // bridges onError handler to handleRetry
   const MAX_RETRIES = 3;
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -60,6 +61,7 @@ export default function VideoPlayerWithLogo({
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [useStreaming, setUseStreaming] = useState(false); // whether we are using MediaSource
   const [activeSubtitle, setActiveSubtitle] = useState(''); // current subtitle text to display
+  const [activeTab, setActiveTab] = useState('captions'); // 'captions' | 'transitions' | 'filters'
 
   /* ── Sync play state + time with video events ──────────────────────── */
   useEffect(() => {
@@ -112,7 +114,9 @@ export default function VideoPlayerWithLogo({
     const onError = () => {
       const mediaErr = el.error;
       let msg = 'Unknown video error';
+      let errorCode = 0;
       if (mediaErr) {
+        errorCode = mediaErr.code;
         const codes = {
           1: 'MEDIA_ERR_ABORTED — Fetching aborted',
           2: 'MEDIA_ERR_NETWORK — Network error',
@@ -121,8 +125,65 @@ export default function VideoPlayerWithLogo({
         };
         msg = codes[mediaErr.code] || `Error code ${mediaErr.code}: ${mediaErr.message}`;
       }
-      console.error('[VideoPlayer] error:', msg);
+
+      // Log full debug info for SRC_NOT_SUPPORTED; compact log for other errors
+      if (errorCode === 4) {
+        const debugInfo = getVideoDebugInfo(el, videoFile);
+        console.error('[VideoPlayer] MEDIA_ERR_SRC_NOT_SUPPORTED — full debug info:', debugInfo);
+        console.error('[VideoPlayer]   src attribute:', el.getAttribute('src'));
+        console.error('[VideoPlayer]   currentSrc:', el.currentSrc);
+        console.error('[VideoPlayer]   networkState:', el.networkState, '(0=Empty, 1=Idle, 2=Loading, 3=NoSrc)');
+        console.error('[VideoPlayer]   readyState:', el.readyState);
+        console.error('[VideoPlayer]   stream active:', !!streamRef.current);
+        console.error('[VideoPlayer]   videoFile:', videoFile ? { name: videoFile.name, size: videoFile.size, type: videoFile.type } : null);
+      } else {
+        console.error('[VideoPlayer] error:', msg, {
+          src: el.src ? el.src.substring(0, 150) : '(empty)',
+          errorCode: errorCode,
+          streamActive: !!streamRef.current,
+        });
+      }
+
       setVideoError(msg);
+
+      // ── Graceful auto-recovery for SRC_NOT_SUPPORTED ──────────────────
+      // Automatically reset the video element and retry with exponential
+      // backoff, so the player doesn't just crash on the user.
+      if (errorCode === 4 && retryCountRef.current < MAX_RETRIES) {
+        retryCountRef.current += 1;
+        var delay = Math.min(1000 * Math.pow(2, retryCountRef.current - 1), 8000);
+        console.log('[VideoPlayer] Auto-recovery: resetting source in ' + delay + 'ms (attempt ' + retryCountRef.current + '/' + MAX_RETRIES + ')');
+        setVideoError('Video source issue — recovering (' + retryCountRef.current + '/' + MAX_RETRIES + ')...');
+
+        if (retryTimerRef.current) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
+
+        retryTimerRef.current = setTimeout(function () {
+          // Use the retry function ref if available, otherwise do a simple reset
+          if (typeof retryFnRef.current === 'function') {
+            retryFnRef.current();
+          } else {
+            // Fallback reset: clean up, clear source, reload
+            if (streamRef.current) {
+              streamRef.current.destroy();
+              streamRef.current = null;
+            }
+            el.src = '';
+            el.load();
+            setTimeout(function () {
+              if (videoRef.current) {
+                videoRef.current.src = videoPreviewUrl || '';
+                videoRef.current.load();
+              }
+            }, 100);
+          }
+        }, delay);
+      } else if (errorCode === 4 && retryCountRef.current >= MAX_RETRIES) {
+        console.error('[VideoPlayer] Max retries (' + MAX_RETRIES + ') reached for SRC_NOT_SUPPORTED — giving up');
+        setVideoError('Video source not supported or URL invalid. Check console for debug info.');
+      }
     };
     const onWaiting = () => {
       console.log('[VideoPlayer] waiting — buffering');
@@ -430,6 +491,11 @@ export default function VideoPlayerWithLogo({
       el.load();
     }
   }, [videoFile, videoPreviewUrl]);
+
+  /* ── Sync retry function ref so onError handler can call it ──────────── */
+  useEffect(() => {
+    retryFnRef.current = handleRetry;
+  }, [handleRetry]);
 
   /* ── Seek relative (seconds) ───────────────────────────────────────── */
   const seekRelative = useCallback((delta) => {
@@ -762,6 +828,28 @@ export default function VideoPlayerWithLogo({
         })()}
       </div>
 
+      {/* ── Tab Bar: Captions / Transitions / Filters ──────────────────── */}
+      <div className="preview-tab-bar">
+        <button
+          className={`preview-tab-btn${activeTab === 'captions' ? ' active' : ''}`}
+          onClick={() => setActiveTab('captions')}
+        >
+          Captions
+        </button>
+        <button
+          className={`preview-tab-btn${activeTab === 'transitions' ? ' active' : ''}`}
+          onClick={() => setActiveTab('transitions')}
+        >
+          Transitions
+        </button>
+        <button
+          className={`preview-tab-btn${activeTab === 'filters' ? ' active' : ''}`}
+          onClick={() => setActiveTab('filters')}
+        >
+          Filters
+        </button>
+      </div>
+
       {/* ── Custom Control Bar ──────────────────────────────────────────── */}
       <div className={`video-control-bar${!videoPreviewUrl ? ' video-control-bar--disabled' : ''}`}>
         {/* Seek row */}
@@ -853,6 +941,100 @@ function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/* ── Helper: validate video src URL before playback ─────────────────────
+ * Returns an object { valid: boolean, reason?: string }.
+ * Checks for null/empty src, blob URLs that may have been revoked,
+ * and obviously malformed URLs.
+ * ─────────────────────────────────────────────────────────────────────── */
+function validateVideoSrc(src) {
+  if (!src) {
+    return { valid: false, reason: 'src is null or undefined' };
+  }
+  if (typeof src !== 'string' || src.trim() === '') {
+    return { valid: false, reason: 'src is not a non-empty string' };
+  }
+
+  // Blob URLs can become invalid if the underlying object URL was revoked
+  if (src.startsWith('blob:')) {
+    // We can't synchronously check if a blob: URL is still valid, but we
+    // can at least note it in the debug info.
+    return { valid: true, note: 'blob URL — may become invalid if revoked' };
+  }
+
+  // Check for obviously malformed data URLs
+  if (src.startsWith('data:')) {
+    const commaIdx = src.indexOf(',');
+    if (commaIdx === -1) {
+      return { valid: false, reason: 'malformed data URL — missing comma separator' };
+    }
+    const mimeMatch = src.substring(5, commaIdx).match(/^[^;]+/);
+    if (!mimeMatch || !mimeMatch[0]) {
+      return { valid: false, reason: 'malformed data URL — missing MIME type' };
+    }
+    return { valid: true, note: 'data URL' };
+  }
+
+  // HTTP/HTTPS URLs — basic structural check
+  if (src.startsWith('http://') || src.startsWith('https://')) {
+    try {
+      new URL(src);
+      return { valid: true };
+    } catch (_e) {
+      return { valid: false, reason: 'malformed URL — new URL() parsing failed: ' + _e.message };
+    }
+  }
+
+  // Relative URLs or other schemes — pass through, let the browser decide
+  return { valid: true, note: 'relative/other URL' };
+}
+
+/* ── Helper: collect exhaustive debug info about the video element and
+ *    its source to help diagnose MEDIA_ERR_SRC_NOT_SUPPORTED and other
+ *    playback errors. Returns a plain object safe for console.log. ── */
+function getVideoDebugInfo(el, videoFile) {
+  const info = {
+    src: el ? (el.src ? el.src.substring(0, 500) : '(empty)') : '(no element)',
+    currentSrc: el ? (el.currentSrc || '(none)') : '(no element)',
+    srcAttribute: el ? (el.getAttribute('src') || '(none)') : '(no element)',
+    networkState: el ? el.networkState : -1,
+    networkStateLabel: el
+      ? (['NETWORK_EMPTY', 'NETWORK_IDLE', 'NETWORK_LOADING', 'NETWORK_NO_SOURCE'][el.networkState] || 'UNKNOWN')
+      : 'N/A',
+    readyState: el ? el.readyState : -1,
+    readyStateLabel: el
+      ? (['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'][el.readyState] || 'UNKNOWN')
+      : 'N/A',
+    errorCode: el && el.error ? el.error.code : -1,
+    errorMessage: el && el.error ? el.error.message : '(none)',
+    videoWidth: el ? el.videoWidth : -1,
+    videoHeight: el ? el.videoHeight : -1,
+    duration: el ? (el.duration || 0) : -1,
+    paused: el ? el.paused : true,
+    seeking: el ? el.seeking : false,
+    ended: el ? el.ended : false,
+    loop: el ? el.loop : false,
+    preload: el ? (el.getAttribute('preload') || 'auto') : 'N/A',
+    crossOrigin: el ? (el.getAttribute('crossorigin') || '(not set)') : 'N/A',
+    hasAttributeMuted: el ? el.hasAttribute('muted') : false,
+    hasAttributePlaysInline: el ? el.hasAttribute('playsinline') : false,
+  };
+
+  // Add src validation result
+  info.srcValidation = validateVideoSrc(el ? (el.src || el.getAttribute('src') || '') : '');
+
+  // Add videoFile info if available
+  if (videoFile) {
+    info.videoFile = {
+      name: videoFile.name,
+      size: videoFile.size,
+      type: videoFile.type,
+      lastModified: new Date(videoFile.lastModified).toISOString(),
+    };
+  }
+
+  return info;
 }
 
 /* ── Helper: compute percentage-based CSS for the video content rect

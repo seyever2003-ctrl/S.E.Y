@@ -159,7 +159,7 @@ export const LOCAL_WHISPER_MODELS = [
   },
 ];
 
-// ── Transcription ──────────────────────────────────────────────────────────────
+// ── Transcription (returns SRT text) ───────────────────────────────────────────
 
 /**
  * Transcribe audio locally using a background Web Worker.
@@ -255,6 +255,118 @@ export async function transcribeLocally(audioBlob, opts) {
   return output;
 }
 
+// ── Transcription (returns App-compatible Segments) ────────────────────────────
+
+/**
+ * Transcribe audio locally and return app-compatible segment objects
+ * that can be passed directly into App.jsx's segments state.
+ *
+ * Each segment: { id, start, end, duration, text, originalText, translated }
+ *
+ * @param {Blob} audioBlob - WAV audio blob (16kHz mono, from extractAudio)
+ * @param {Object} [opts]
+ * @param {'tiny'|'base'|'small'} [opts.modelSize='small'] - Whisper model size
+ * @param {string} [opts.language] - Language code (e.g. 'km', 'en') or empty for auto-detect
+ * @param {Function} [opts.onLog] - Log callback
+ * @param {Function} [opts.onProgress] - Progress callback (0-1)
+ * @param {AbortSignal} [opts.signal] - Optional AbortSignal
+ * @returns {Promise<Array<{id:number,start:number,end:number,duration:number,text:string,originalText:string,translated:boolean}>>}
+ */
+export async function transcribeLocallyToSegments(audioBlob, opts) {
+  if (!opts) opts = {};
+  var modelSize = opts.modelSize || 'small';
+  var language = opts.language || 'km';
+  var onLog = opts.onLog;
+  var onProgress = opts.onProgress;
+  var signal = opts.signal;
+
+  if (signal?.aborted) throw new DOMException('Transcription cancelled', 'AbortError');
+
+  onLog?.('Starting local transcription engine (direct segments)...');
+
+  // Step 1: Load the module worker
+  var workerApi;
+  try {
+    workerApi = await getWorker(modelSize, onLog, signal);
+  } catch (initErr) {
+    onLog?.('ERROR: ' + initErr.message);
+    throw initErr;
+  }
+  if (signal?.aborted) throw new DOMException('Transcription cancelled', 'AbortError');
+
+  // Step 2: Decode WAV to Float32Array
+  onLog?.('Decoding audio for processing...');
+  var audioData;
+  try {
+    var arrayBuf = await audioBlob.arrayBuffer();
+    var ctx = new AudioContext({ sampleRate: 16000 });
+    var audioBuf = await ctx.decodeAudioData(arrayBuf);
+    audioData = audioBuf.getChannelData(0);
+    ctx.close();
+  } catch (decodeErr) {
+    onLog?.('ERROR: Audio decoding failed: ' + (decodeErr.message || 'Corrupted WAV'));
+    throw new Error('Audio decoding failed: ' + (decodeErr.message || 'WAV not recognized'));
+  }
+
+  onLog?.('Transcribing (' + (audioData.length / 16000 / 60).toFixed(1) + ' min, ' +
+    (audioData.byteLength / 1024 / 1024).toFixed(1) + ' MB) with Whisper ' + modelSize + '...');
+  if (signal?.aborted) throw new DOMException('Transcription cancelled', 'AbortError');
+
+  // Step 3: Send audio to worker
+  var result;
+  try {
+    result = await sendToWorker(workerApi, audioData, {
+      language: language,
+      onLog: onLog,
+      onProgress: onProgress,
+    });
+  } catch (transErr) {
+    onLog?.('ERROR: ' + transErr.message);
+    throw transErr;
+  }
+
+  // Step 4: Convert chunks to app-compatible segments
+  if (!result || (!result.chunks && !result.text)) {
+    throw new Error('Transcription returned empty result. Audio may be silent.');
+  }
+
+  var segments = [];
+  var chunks = result.chunks || [];
+
+  if (chunks.length === 0 && result.text) {
+    // No timestamps — create a single segment
+    segments.push({
+      id: 1,
+      start: 0,
+      end: 10,
+      duration: 10,
+      text: (result.text || '').trim(),
+      originalText: (result.text || '').trim(),
+      translated: false,
+    });
+  } else {
+    for (var i = 0; i < chunks.length; i++) {
+      var c = chunks[i];
+      var t = (c.text || '').trim();
+      if (!t) continue;
+      var start = c.timestamp ? c.timestamp[0] : 0;
+      var end = c.timestamp ? c.timestamp[1] : 0;
+      segments.push({
+        id: i + 1,
+        start: start,
+        end: end,
+        duration: end - start,
+        text: t,
+        originalText: t,
+        translated: false,
+      });
+    }
+  }
+
+  onLog?.('Complete: ' + segments.length + ' segments generated (no API key needed).');
+  return segments;
+}
+
 // ── Model Cache Info ───────────────────────────────────────────────────────────
 
 /**
@@ -275,4 +387,23 @@ export async function isModelCached(size = 'base') {
   } catch {
     return false;
   }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Format seconds as SRT timestamp: HH:MM:SS,mmm
+ */
+function fmtTime(seconds) {
+  if (seconds == null || isNaN(seconds)) return '00:00:00,000';
+  var h = Math.floor(seconds / 3600);
+  var m = Math.floor((seconds % 3600) / 60);
+  var s = Math.floor(seconds % 60);
+  var ms = Math.floor((seconds % 1) * 1000);
+  return (
+    String(h).padStart(2, '0') + ':' +
+    String(m).padStart(2, '0') + ':' +
+    String(s).padStart(2, '0') + ',' +
+    String(ms).padStart(3, '0')
+  );
 }
