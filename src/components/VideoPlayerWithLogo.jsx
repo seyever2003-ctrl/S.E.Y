@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Play, Pause, RotateCcw, SkipForward } from 'lucide-react';
+import { Play, Pause, RotateCcw, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import './LogoOverlay.css';
 
 /**
@@ -34,6 +34,9 @@ export default function VideoPlayerWithLogo({
   const [duration, setDuration] = useState(0);
   const [videoError, setVideoError] = useState(null);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   /* ── Sync play state + time with video events ──────────────────────── */
   useEffect(() => {
@@ -148,6 +151,30 @@ export default function VideoPlayerWithLogo({
     setCurrentTime(clamped);
   }, []);
 
+  /* ── Sync volume / muted state to <video> element ──────────────────────── */
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.volume = volume;
+    el.muted = isMuted;
+  }, [volume, isMuted]);
+
+  /* ── Mute / Unmute toggle ──────────────────────────────────────────── */
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => !prev);
+  }, []);
+
+  /* ── Volume slider handler ─────────────────────────────────────────── */
+  const handleVolumeChange = useCallback((e) => {
+    const val = Number(e.target.value);
+    setVolume(val);
+    if (val === 0) {
+      setIsMuted(true);
+    } else if (isMuted) {
+      setIsMuted(false);
+    }
+  }, [isMuted]);
+
   /* ── Play / Pause toggle ───────────────────────────────────────────── */
   const togglePlay = useCallback(() => {
     const el = videoRef.current;
@@ -157,11 +184,31 @@ export default function VideoPlayerWithLogo({
         console.error('[VideoPlayer] play() failed:', err);
         // If autoplay was blocked, fall back to paused state
         setIsPlaying(false);
+        // Mark that audio was blocked by the browser's autoplay policy
+        // so we can guide the user to interact first
+        setAudioBlocked(true);
       });
     } else {
       el.pause();
     }
   }, []);
+
+  /* ── Retry playback after user interaction (for autoplay policy) ──── */
+  const handleAudioBlockedClick = useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    setAudioBlocked(false);
+    // Briefly mute, start playback, then restore volume
+    el.muted = true;
+    el.play().then(() => {
+      // Restore desired muted/volume state after playback starts
+      el.muted = isMuted;
+      el.volume = volume;
+    }).catch((err) => {
+      console.error('[VideoPlayer] retry play() still failed:', err);
+      setIsPlaying(false);
+    });
+  }, [isMuted, volume]);
 
   /* ── Seek relative (seconds) ───────────────────────────────────────── */
   const seekRelative = useCallback((delta) => {
@@ -172,28 +219,111 @@ export default function VideoPlayerWithLogo({
     el.currentTime = Math.max(0, Math.min(d, el.currentTime + delta));
   }, []);
 
-  /* ── Drag handler ─────────────────────────────────────────────────────── */
+  /* ── Helper: compute the actual rendered video content rect (excludes
+   *    letterbox / pillarbox that object-fit: contain leaves around it) ─── */
+  const getVideoContentRect = useCallback(() => {
+    const stage = stageRef.current;
+    const video = videoRef.current;
+    if (!stage || !video) return null;
+    const stageRect = stage.getBoundingClientRect();
+    const videoRect = video.getBoundingClientRect();
+    if (stageRect.width === 0 || stageRect.height === 0) return null;
+    if (videoRect.width === 0 || videoRect.height === 0) return null;
+
+    const elW = videoRect.width;
+    const elH = videoRect.height;
+    const vW = video.videoWidth || elW;  // intrinsic width (falls back to element width)
+    const vH = video.videoHeight || elH; // intrinsic height (falls back to element height)
+
+    let renderW, renderH, offsetX, offsetY;
+    if (vW === elW && vH === elH) {
+      // No intrinsic dimensions available (e.g. video not loaded yet) — use full element
+      renderW = elW;
+      renderH = elH;
+      offsetX = 0;
+      offsetY = 0;
+    } else {
+      const elAspect = elW / elH;
+      const vAspect = vW / vH;
+      if (vAspect > elAspect) {
+        // Video is wider (relative to element) → letterbox on top / bottom
+        renderW = elW;
+        renderH = elW / vAspect;
+        offsetX = 0;
+        offsetY = (elH - renderH) / 2;
+      } else {
+        // Video is taller (relative to element) → letterbox on left / right
+        renderH = elH;
+        renderW = elH * vAspect;
+        offsetX = (elW - renderW) / 2;
+        offsetY = 0;
+      }
+    }
+
+    return {
+      left:   (videoRect.left - stageRect.left) + offsetX,
+      top:    (videoRect.top  - stageRect.top)  + offsetY,
+      right:  (videoRect.left - stageRect.left) + offsetX + renderW,
+      bottom: (videoRect.top  - stageRect.top)  + offsetY + renderH,
+      width:  renderW,
+      height: renderH,
+    };
+  }, []); // no deps — reads refs at call-time
+
+  /* ── Drag handler (clamped to video-element bounds) ────────────────────── */
   const handleLogoMouseDown = useCallback((e) => {
-    if (!stageRef.current || !onLogoPositionChange) return;
+    if (!stageRef.current || !videoRef.current || !onLogoPositionChange) return;
     e.preventDefault();
-    const rect = stageRef.current.getBoundingClientRect();
+
+    // Compute the strict video-content boundary (excludes letterbox bars)
+    const contentRect = getVideoContentRect();
+    if (!contentRect) return;
+
+    const stageRect = stageRef.current.getBoundingClientRect();
+    const logoEl = e.currentTarget;
+    const logoRect = logoEl.getBoundingClientRect();
+
+    // Half-dimensions of the logo — guard against zero/undefined so clamping never fails
+    const logoW = logoRect.width || 0;
+    const logoH = logoRect.height || 0;
+    const halfLogoW = logoW / 2;
+    const halfLogoH = logoH / 2;
+
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
       startPctX: logoX,
       startPctY: logoY,
+      halfLogoW,
+      halfLogoH,
     };
-    const rectAtStart = rect; // capture
+    // Capture snapshots so onMove doesn't need closure refs that may shift
+    const snap = { stageRect, contentRect };
     const onMove = (ev) => {
       if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.startX;
-      const dy = ev.clientY - dragRef.current.startY;
-      const pctX = dragRef.current.startPctX + (dx / rectAtStart.width) * 100;
-      const pctY = dragRef.current.startPctY + (dy / rectAtStart.height) * 100;
-      onLogoPositionChange(
-        Math.max(0, Math.min(100, pctX)),
-        Math.max(0, Math.min(100, pctY))
-      );
+      const { startX, startY, startPctX, startPctY, halfLogoW: hw, halfLogoH: hh } = dragRef.current;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+
+      // Convert start position to stage-relative pixels, add drag offset → center in pixels
+      let centerPxX = (startPctX / 100) * snap.stageRect.width + dx;
+      let centerPxY = (startPctY / 100) * snap.stageRect.height + dy;
+
+      // Clamp so the entire logo stays within the actual VIDEO CONTENT area
+      // (never into letterbox/pillarbox bars)
+      const clampedX = Math.max(snap.contentRect.left + hw,
+                                Math.min(snap.contentRect.right - hw, centerPxX));
+      const clampedY = Math.max(snap.contentRect.top + hh,
+                                Math.min(snap.contentRect.bottom - hh, centerPxY));
+
+      // Guard against NaN / Infinity propagating to state
+      if (!isFinite(clampedX) || !isFinite(clampedY)) return;
+
+      // Convert back to percentage of the STAGE (left/top CSS is relative to stage)
+      const pctX = (clampedX / snap.stageRect.width) * 100;
+      const pctY = (clampedY / snap.stageRect.height) * 100;
+
+      onLogoPositionChange(pctX, pctY);
     };
     const onUp = () => {
       dragRef.current = null;
@@ -202,7 +332,7 @@ export default function VideoPlayerWithLogo({
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [logoX, logoY, onLogoPositionChange]);
+  }, [logoX, logoY, onLogoPositionChange, getVideoContentRect]);
 
   /* ── Resize handler ───────────────────────────────────────────────────── */
   const handleResizeStart = useCallback((e) => {
@@ -211,6 +341,10 @@ export default function VideoPlayerWithLogo({
     e.stopPropagation();
     const handle = e.currentTarget.getAttribute('data-handle');
     const rect = stageRef.current.getBoundingClientRect();
+    // Capture wrapper element reference synchronously — e.currentTarget may be
+    // nullified later (React synthetic event lifecycle), so relying on it inside
+    // the async onUp callback would cause a TypeError and prevent cleanup.
+    const wrapperEl = e.currentTarget.parentElement;
     resizeRef.current = {
       handle,
       startX: e.clientX,
@@ -227,13 +361,41 @@ export default function VideoPlayerWithLogo({
       onLogoSizeChange?.(newSize);
     };
     const onUp = () => {
+      // ⚠️ Cleanup MUST happen first so that even if the position-clamping
+      // logic below throws, the resize state is released immediately.
       resizeRef.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+
+      // After resize completes, re-clamp the logo position to prevent overflow
+      if (onLogoPositionChange && wrapperEl) {
+        const contentRect = getVideoContentRect();
+        const sRect = stageRef.current?.getBoundingClientRect();
+        if (contentRect && sRect) {
+          const wRect = wrapperEl.getBoundingClientRect();
+          const halfW = wRect.width / 2;
+          const halfH = wRect.height / 2;
+
+          // Logo center in stage-relative pixels (from current percentage props)
+          const cx = (logoX / 100) * sRect.width;
+          const cy = (logoY / 100) * sRect.height;
+
+          const newCx = Math.max(contentRect.left + halfW,
+                                 Math.min(contentRect.right - halfW, cx));
+          const newCy = Math.max(contentRect.top + halfH,
+                                 Math.min(contentRect.bottom - halfH, cy));
+
+          if (isFinite(newCx) && isFinite(newCy) && (newCx !== cx || newCy !== cy)) {
+            const pctX = (newCx / sRect.width) * 100;
+            const pctY = (newCy / sRect.height) * 100;
+            onLogoPositionChange(pctX, pctY);
+          }
+        }
+      }
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [logoSize, onLogoSizeChange]);
+  }, [logoSize, logoX, logoY, onLogoPositionChange, onLogoSizeChange]);
 
   return (
     <div className="video-player-with-logo">
@@ -244,7 +406,7 @@ export default function VideoPlayerWithLogo({
             ref={videoRef}
             className="preview-display-video"
             src={videoPreviewUrl}
-            muted
+            muted={isMuted}
             loop
             playsInline
             controls={false}
@@ -276,6 +438,19 @@ export default function VideoPlayerWithLogo({
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             <span>Video error</span>
+          </div>
+        )}
+
+        {/* Audio blocked overlay — browser prevented autoplay with sound */}
+        {videoPreviewUrl && audioBlocked && (
+          <div className="audio-blocked-overlay" onClick={handleAudioBlockedClick}>
+            <div className="audio-blocked-content">
+              <VolumeX size={28} />
+              <span>Click to enable audio</span>
+              <span className="audio-blocked-hint">
+                Your browser requires a user interaction to start playback with sound.
+              </span>
+            </div>
           </div>
         )}
 
@@ -313,11 +488,26 @@ export default function VideoPlayerWithLogo({
           const dirClass = overlayDirection === 'top-to-bottom'
             ? 'text-scroll-down'
             : 'text-scroll-up';
+
+          // Calculate video-content-only bounds so text never spills into
+          // letterbox / pillarbox bars (left/right black bars on portrait video).
+          const vBounds = computeVideoContentPct(stageRef.current, videoRef.current);
+
           return (
             <div
               className="text-scroll-overlay"
               aria-live="off"
-              style={{ opacity: overlayOpacity }}
+              style={{
+                opacity: overlayOpacity,
+                /* Override the default inset:0 so the overlay is pinned to
+                   the actual video content rectangle */
+                left: vBounds?.left ?? '0',
+                top: vBounds?.top ?? '0',
+                width: vBounds?.width ?? '100%',
+                height: vBounds?.height ?? '100%',
+                right: 'auto',
+                bottom: 'auto',
+              }}
             >
               <div
                 className={`text-scroll-content ${dirClass}`}
@@ -390,6 +580,29 @@ export default function VideoPlayerWithLogo({
             <SkipForward size={15} />
             <span className="control-btn-label">5</span>
           </button>
+
+          {/* Volume / Mute section */}
+          <div className="control-volume-section">
+            <button
+              className="control-btn control-btn--mute"
+              onClick={toggleMute}
+              disabled={!videoPreviewUrl}
+              title={isMuted ? 'Unmute' : 'Mute'}
+            >
+              {isMuted || volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            </button>
+            <input
+              type="range"
+              className="control-volume-slider"
+              min={0}
+              max={1}
+              step={0.05}
+              value={isMuted ? 0 : volume}
+              onInput={handleVolumeChange}
+              disabled={!videoPreviewUrl}
+              aria-label="Volume"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -402,4 +615,46 @@ function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/* ── Helper: compute percentage-based CSS for the video content rect
+ *    (excludes letterbox/pillarbox bars that object-fit: contain creates).
+ *    Returns { left, top, width, height } as percentage strings, or null. ── */
+function computeVideoContentPct(stageEl, videoEl) {
+  if (!stageEl || !videoEl) return null;
+  const sr = stageEl.getBoundingClientRect();
+  const vr = videoEl.getBoundingClientRect();
+  if (sr.width === 0 || sr.height === 0) return null;
+  if (vr.width === 0 || vr.height === 0) return null;
+
+  const elW = vr.width;
+  const elH = vr.height;
+  // intrinsic dimensions (0 until loadedmetadata fires)
+  const vW = videoEl.videoWidth || elW;
+  const vH = videoEl.videoHeight || elH;
+
+  let renderW, renderH, offsetX, offsetY;
+  if (vW === elW && vH === elH) {
+    // No intrinsic dims available yet – use full element
+    renderW = elW; renderH = elH; offsetX = 0; offsetY = 0;
+  } else {
+    const elAspect = elW / elH;
+    const vAspect = vW / vH;
+    if (vAspect > elAspect) {
+      // Video wider (relative) → letterbox top/bottom
+      renderW = elW; renderH = elW / vAspect;
+      offsetX = 0; offsetY = (elH - renderH) / 2;
+    } else {
+      // Video taller (relative) → letterbox left/right
+      renderH = elH; renderW = elH * vAspect;
+      offsetY = 0; offsetX = (elW - renderW) / 2;
+    }
+  }
+
+  return {
+    left:   `${(offsetX             / sr.width) * 100}%`,
+    top:    `${(offsetY             / sr.height) * 100}%`,
+    width:  `${(renderW             / sr.width) * 100}%`,
+    height: `${(renderH             / sr.height) * 100}%`,
+  };
 }

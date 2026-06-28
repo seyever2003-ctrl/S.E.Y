@@ -304,7 +304,7 @@
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #000;
+  background: var(--bg-base);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   overflow: hidden;
   margin-bottom: 0;
@@ -693,3 +693,108 @@
 .logo-resize-ne { top: -5px;  right: -5px; cursor: ne-resize; }
 .logo-resize-sw { bottom: -5px; left: -5px; cursor: sw-resize; }
 .logo-resize-se { bottom: -5px; right: -5px; cursor: se-resize; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VOLUME CONTROL (Mute Button + Slider)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.control-volume-section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.control-btn--mute {
+  padding: 4px 5px;
+}
+
+.control-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 60px;
+  height: 4px;
+  background: var(--bg-active);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  min-width: 0;
+}
+
+.control-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: 1.5px solid #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  transition: transform 0.15s;
+}
+
+.control-volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.control-volume-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: 1.5px solid #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+.control-volume-slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUDIO BLOCKED OVERLAY
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.audio-blocked-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+  transition: opacity 0.2s;
+}
+
+.audio-blocked-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 30px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--accent-primary);
+  box-shadow: 0 0 30px var(--accent-glow-strong);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.audio-blocked-content svg {
+  color: var(--accent-secondary);
+}
+
+.audio-blocked-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-muted);
+  max-width: 200px;
+  line-height: 1.4;
+}

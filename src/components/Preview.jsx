@@ -35,30 +35,101 @@ export default function Preview({
 
   // ── Logo drag / resize state & handlers ──────────────────────────────────
   const stageRef = useRef(null);
-  const dragRef = useRef(null); // { startX, startY, startPctX, startPctY } for drag
+  const videoRef = useRef(null);
+  const dragRef = useRef(null); // { startX, startY, startPctX, startPctY, halfLogoW, halfLogoH } for drag
   const resizeRef = useRef(null); // { handle, startX, startY, startSize } for resize
 
+  /* ── Helper: compute the actual rendered video content rect (excludes
+   *    letterbox / pillarbox that object-fit: contain leaves around it) ─── */
+  const getVideoContentRect = useCallback(() => {
+    const stage = stageRef.current;
+    const video = videoRef.current;
+    if (!stage || !video) return null;
+    const stageRect = stage.getBoundingClientRect();
+    const videoRect = video.getBoundingClientRect();
+    if (stageRect.width === 0 || stageRect.height === 0) return null;
+    if (videoRect.width === 0 || videoRect.height === 0) return null;
+
+    const elW = videoRect.width;
+    const elH = videoRect.height;
+    const vW = video.videoWidth || elW;
+    const vH = video.videoHeight || elH;
+
+    let renderW, renderH, offsetX, offsetY;
+    if (vW === elW && vH === elH) {
+      renderW = elW; renderH = elH; offsetX = 0; offsetY = 0;
+    } else {
+      const elAspect = elW / elH;
+      const vAspect = vW / vH;
+      if (vAspect > elAspect) {
+        renderW = elW; renderH = elW / vAspect; offsetX = 0;
+        offsetY = (elH - renderH) / 2;
+      } else {
+        renderH = elH; renderW = elH * vAspect; offsetY = 0;
+        offsetX = (elW - renderW) / 2;
+      }
+    }
+    return {
+      left:   (videoRect.left - stageRect.left) + offsetX,
+      top:    (videoRect.top  - stageRect.top)  + offsetY,
+      right:  (videoRect.left - stageRect.left) + offsetX + renderW,
+      bottom: (videoRect.top  - stageRect.top)  + offsetY + renderH,
+    };
+  }, []);
+
   const handleLogoMouseDown = useCallback((e) => {
-    if (!stageRef.current || !onLogoPositionChange) return;
+    if (!stageRef.current || !videoRef.current || !onLogoPositionChange) return;
     e.preventDefault();
-    const rect = stageRef.current.getBoundingClientRect();
+
+    // Compute the strict video-content boundary (excludes letterbox bars)
+    const contentRect = getVideoContentRect();
+    if (!contentRect) return;
+
+    const stageRect = stageRef.current.getBoundingClientRect();
+    const logoEl = e.currentTarget;
+    const logoRect = logoEl.getBoundingClientRect();
+
+    // Half-dimensions of the logo — guard against zero/undefined so clamping never fails
+    const logoW = logoRect.width || 0;
+    const logoH = logoRect.height || 0;
+    const halfLogoW = logoW / 2;
+    const halfLogoH = logoH / 2;
+
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
       startPctX: logoX,
       startPctY: logoY,
+      halfLogoW,
+      halfLogoH,
     };
+    const snap = { stageRect, contentRect };
     // Global listeners
     const onMove = (ev) => {
       if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.startX;
-      const dy = ev.clientY - dragRef.current.startY;
-      const pctX = dragRef.current.startPctX + (dx / rect.width) * 100;
-      const pctY = dragRef.current.startPctY + (dy / rect.height) * 100;
-      onLogoPositionChange(
-        Math.max(0, Math.min(100, pctX)),
-        Math.max(0, Math.min(100, pctY))
-      );
+      const { startX, startY, startPctX, startPctY, halfLogoW: hw, halfLogoH: hh } = dragRef.current;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+
+      // Convert start position to stage-relative pixels, add drag offset → center in pixels
+      let centerPxX = (startPctX / 100) * snap.stageRect.width + dx;
+      let centerPxY = (startPctY / 100) * snap.stageRect.height + dy;
+
+      // Clamp so the entire logo stays within the actual VIDEO CONTENT area
+      // (never into letterbox/pillarbox bars)
+      const clampedX = Math.max(snap.contentRect.left + hw,
+                                Math.min(snap.contentRect.right - hw, centerPxX));
+      const clampedY = Math.max(snap.contentRect.top + hh,
+                                Math.min(snap.contentRect.bottom - hh, centerPxY));
+
+      // Guard against NaN / Infinity propagating to state
+      if (!isFinite(clampedX) || !isFinite(clampedY)) return;
+
+      // Convert back to percentage of the STAGE (left/top CSS is relative to stage)
+      const pctX = (clampedX / snap.stageRect.width) * 100;
+      const pctY = (clampedY / snap.stageRect.height) * 100;
+
+      onLogoPositionChange(pctX, pctY);
     };
     const onUp = () => {
       dragRef.current = null;
@@ -67,7 +138,7 @@ export default function Preview({
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [logoX, logoY, onLogoPositionChange]);
+  }, [logoX, logoY, onLogoPositionChange, getVideoContentRect]);
 
   const handleResizeStart = useCallback((e) => {
     if (!stageRef.current) return;
@@ -75,6 +146,10 @@ export default function Preview({
     e.stopPropagation();
     const handle = e.currentTarget.getAttribute('data-handle');
     const rect = stageRef.current.getBoundingClientRect();
+    // Capture wrapper element reference synchronously — e.currentTarget may be
+    // nullified later (React synthetic event lifecycle), so relying on it inside
+    // the async onUp callback would cause a TypeError and prevent cleanup.
+    const wrapperEl = e.currentTarget.parentElement;
     resizeRef.current = {
       handle,
       startX: e.clientX,
@@ -93,13 +168,41 @@ export default function Preview({
       onLogoSizeChange?.(newSize);
     };
     const onUp = () => {
+      // ⚠️ Cleanup MUST happen first so that even if the position-clamping
+      // logic below throws, the resize state is released immediately.
       resizeRef.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+
+      // After resize completes, re-clamp the logo position to prevent overflow
+      if (onLogoPositionChange && wrapperEl) {
+        const contentRect = getVideoContentRect();
+        const sRect = stageRef.current?.getBoundingClientRect();
+        if (contentRect && sRect) {
+          const wRect = wrapperEl.getBoundingClientRect();
+          const halfW = wRect.width / 2;
+          const halfH = wRect.height / 2;
+
+          // Logo center in stage-relative pixels (from current percentage props)
+          const cx = (logoX / 100) * sRect.width;
+          const cy = (logoY / 100) * sRect.height;
+
+          const newCx = Math.max(contentRect.left + halfW,
+                                 Math.min(contentRect.right - halfW, cx));
+          const newCy = Math.max(contentRect.top + halfH,
+                                 Math.min(contentRect.bottom - halfH, cy));
+
+          if (isFinite(newCx) && isFinite(newCy) && (newCx !== cx || newCy !== cy)) {
+            const pctX = (newCx / sRect.width) * 100;
+            const pctY = (newCy / sRect.height) * 100;
+            onLogoPositionChange(pctX, pctY);
+          }
+        }
+      }
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [logoSize, onLogoSizeChange]);
+  }, [logoSize, logoX, logoY, onLogoPositionChange, onLogoSizeChange]);
 
   const buildAudio = useCallback((srcSegments, srcMode, buffers, pad) => {
     if (!srcSegments?.length) return;
@@ -260,9 +363,9 @@ export default function Preview({
       >
         {videoPreviewUrl ? (
           <video
+            ref={videoRef}
             className="preview-display-video"
             src={videoPreviewUrl}
-            muted
             loop
             playsInline
             controls={false}
