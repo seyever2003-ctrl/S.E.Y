@@ -80,6 +80,7 @@ export default function App() {
   // ── Video state ──────────────────────────────────────────────────────
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
+  const [mediaLibrary, setMediaLibrary] = useState([]);
   const [isMerging, setIsMerging] = useState(false);
   const [mergeProgress, setMergeProgress] = useState(0);
   const [mergeLog, setMergeLog] = useState('');
@@ -422,7 +423,12 @@ export default function App() {
               </svg>
               Video
             </h3>
-            <VideoUploader onVideoLoaded={handleVideoLoaded} disabled={isMerging} hideVideoPreview={!!videoFile} />
+            <VideoUploader
+              onVideoLoaded={handleVideoLoaded}
+              mediaLibrary={mediaLibrary}
+              setMediaLibrary={setMediaLibrary}
+              disabled={isMerging}
+            />
           </div>
 
           {/* ── Auto-Caption Section ────────────────────────────── */}
@@ -733,6 +739,7 @@ export default function App() {
               overlaySpeed={overlaySpeed}
               overlayOpacity={overlayOpacity}
               subtitles={processedSegments.length > 0 ? processedSegments : segments}
+              timelineTime={currentTime}
             />
           </div>
 

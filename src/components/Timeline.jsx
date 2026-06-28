@@ -211,7 +211,6 @@ export default function Timeline({
   const waveformRef = useRef(null);
   const wavesurferRef = useRef(null);
   const scrollRef = useRef(null);
-  const playheadRef = useRef(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [waveformReady, setWaveformReady] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1.0);
@@ -267,43 +266,10 @@ export default function Timeline({
       if (!el || !onTimeUpdate) return;
       const rect = el.getBoundingClientRect();
       const sl = scrollRef.current ? scrollRef.current.scrollLeft : 0;
-      onTimeUpdate(Math.max(0, Math.min(dur, (e.clientX - rect.left + sl) / pixelsPerSecond)));
+      onTimeUpdate(Math.max(0, Math.min(dur, ((e.clientX - rect.left + sl) / totalWidth) * dur)));
     },
-    [onTimeUpdate, pixelsPerSecond, dur]
+    [onTimeUpdate, pixelsPerSecond, dur, totalWidth]
   );
-
-  /* ── Draggable playhead ────────────────────────────────────────────────── */
-  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
-
-  const handlePlayheadMouseDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingPlayhead(true);
-  }, []);
-
-  // Attach global mousemove / mouseup while dragging so the user can drag
-  // across the entire document without losing capture.
-  useEffect(() => {
-    if (!isDraggingPlayhead) return;
-    const handleMove = (e) => {
-      if (!scrollRef.current || !onTimeUpdate) return;
-      const container = scrollRef.current;
-      const rect = container.getBoundingClientRect();
-      const scrollLeft = container.scrollLeft;
-      const x = e.clientX - rect.left + scrollLeft;
-      const newTime = Math.max(0, Math.min(dur, x / pixelsPerSecond));
-      onTimeUpdate(newTime);
-    };
-    const handleUp = () => {
-      setIsDraggingPlayhead(false);
-    };
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-  }, [isDraggingPlayhead, dur, pixelsPerSecond, onTimeUpdate]);
 
   /* ── WaveSurfer audio waveform ─────────────────────────────────────────── */
   useEffect(() => {
@@ -406,14 +372,6 @@ export default function Timeline({
             })}
           </div>
           <div className="timeline-tracks-spacer" style={{ width: totalWidth }} />
-        </div>
-        <div
-          className="timeline-playhead-bar"
-          ref={playheadRef}
-          style={{ transform: `translateX(${currentTime * pixelsPerSecond}px)` }}
-          onMouseDown={handlePlayheadMouseDown}
-        >
-          <div className="timeline-playhead-handle" />
         </div>
       </div>
     </div>

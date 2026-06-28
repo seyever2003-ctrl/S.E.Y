@@ -632,7 +632,8 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* overflow: hidden removed — was clipping .timeline-tracks-spacer
+     width, preventing scrollWidth from reaching totalWidth */
   position: relative;
   background: var(--bg-surface);
 }
@@ -1146,7 +1147,8 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* overflow: hidden removed — was clipping the .timeline-tracks-spacer
+     width, preventing scrollWidth from reaching totalWidth */
   background: var(--bg-surface);
 }
 
@@ -1174,57 +1176,7 @@
   min-height: 100%;
 }
 
-/* ── Global playhead (pixel-based, inside scroll container) ───────────────── */
-
-.timeline-playhead-bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: #ef4444;
-  box-shadow: 0 0 10px rgba(239, 68, 68, 0.6), 0 0 20px rgba(239, 68, 68, 0.3);
-  z-index: 10;
-  pointer-events: auto;
-  cursor: col-resize;
-}
-
-/* Draggable handle on top of the playhead bar — wider hit area for easy grabbing */
-.timeline-playhead-handle {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: 12px;
-  height: 16px;
-  border-radius: 0 0 6px 6px;
-  background: #ef4444;
-  transform: translateX(-50%);
-  cursor: col-resize;
-  pointer-events: auto;
-  box-shadow: 0 1px 4px rgba(239, 68, 68, 0.5);
-}
-
-.timeline-playhead-handle::before,
-.timeline-playhead-handle::after {
-  content: '';
-  position: absolute;
-  top: 4px;
-  width: 2px;
-  height: 8px;
-  background: rgba(255, 255, 255, 0.7);
-  border-radius: 1px;
-}
-.timeline-playhead-handle::before { left: 3px; }
-.timeline-playhead-handle::after  { right: 3px; }
-
-/* Invisible wider hit strip along the whole playhead line for easier grabbing */
-.timeline-playhead-hitarea {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -5px;
-  right: -5px;
-  cursor: col-resize;
-}
+/* ── (Playhead bar removed) ──────────────────────────────────────────────── */
 
 /* ── Track Area ──────────────────────────────────────────────────────────── */
 
@@ -2493,44 +2445,150 @@
    VIDEO UPLOADER
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.video-uploader-panel { width: 100%; }
+/* ── Media Library ────────────────────────────────────────────────────────── */
 
-.video-drop-zone {
+.media-library {
+  width: 100%;
+  position: relative;
+}
+
+.media-drop-zone {
   border: 2px dashed var(--border-medium);
   border-radius: var(--radius-lg);
-  padding: 20px 12px;
+  padding: 16px 12px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   background: var(--bg-elevated);
-  min-height: 100px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
 }
-
-.video-drop-zone:hover:not(.disabled),
-.video-drop-zone.drag-over {
+/* ── hover ─────────────────────────────────── */
+.media-drop-zone:hover:not(.disabled) {
   border-color: var(--accent-primary);
   background: var(--accent-glow);
 }
+/* ── drag-over (purple highlight) ──────────── */
+.media-drop-zone.drag-over {
+  border-color: var(--accent-secondary);
+  border-width: 2px;
+  background: var(--accent-glow-strong);
+  box-shadow: 0 0 0 2px var(--accent-secondary), inset 0 0 20px var(--accent-glow);
+  transform: scale(1.01);
+}
+.media-drop-zone.disabled { opacity: 0.4; cursor: not-allowed; }
+.media-drop-icon { color: var(--text-muted); transition: color 0.2s; }
+.media-drop-zone:hover:not(.disabled) .media-drop-icon,
+.media-drop-zone.drag-over .media-drop-icon { color: var(--accent-secondary); }
+.media-drop-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); transition: color 0.2s; }
+.media-drop-zone.drag-over .media-drop-title { color: var(--accent-secondary); }
+.media-drop-subtitle { font-size: 10px; color: var(--text-muted); }
 
-.video-drop-zone.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+/* ── Card Vertical List ──────────────────────────────────────────────────── */
+
+.media-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
 }
 
-.video-drop-icon { color: var(--text-muted); transition: color 0.2s; }
-
-.video-drop-zone:hover:not(.disabled) .video-drop-icon,
-.video-drop-zone.drag-over .video-drop-icon {
-  color: var(--accent-secondary);
+.media-library-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  padding: 2px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.media-library-card:hover {
+  border-color: var(--accent-secondary);
+  box-shadow: 0 0 0 1px var(--accent-secondary);
 }
 
-.video-drop-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-.video-drop-subtitle { font-size: 10px; color: var(--text-muted); }
+.media-card-thumb {
+  position: relative;
+  width: 64px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #000;
+}
+
+.media-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.media-card-duration {
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  font-size: 8px;
+  font-family: var(--font-mono);
+  color: #fff;
+  background: rgba(0,0,0,0.75);
+  padding: 0 3px;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+
+.media-card-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.media-card-filename {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-card-remove {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  opacity: 0.7;
+}
+.media-card-remove:hover {
+  background: var(--bg-hover);
+  color: var(--error, #ef4444);
+  opacity: 1;
+}
+
+.media-upload-error {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--error);
+}
 
 /* ── Preview Card ──────────────────────────────────────────────────────── */
 

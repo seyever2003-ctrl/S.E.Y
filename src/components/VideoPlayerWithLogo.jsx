@@ -35,12 +35,16 @@ export default function VideoPlayerWithLogo({
   overlayOpacity = 1.0,
   /* ── Subtitles ────────────────────────────────────────────────── */
   subtitles = [],       // array of {id, start, end, text} — the transcribed & translated segments
+  /* ── External time sync (from Timeline playhead drag) ─────────── */
+  timelineTime,
 }) {
   const stageRef = useRef(null);
   const videoRef = useRef(null);
   const dragRef = useRef(null);
   const resizeRef = useRef(null);
   const seekingRef = useRef(false);
+  /** Tracks the last externally-set time so we don't re-seek on every render */
+  const lastExternalTimeRef = useRef(null);
   const streamRef = useRef(null);       // holds active MediaSource stream
   const retryCountRef = useRef(0);      // tracks retry attempts
   const retryTimerRef = useRef(null);   // holds setTimeout for retry
@@ -285,6 +289,48 @@ export default function VideoPlayerWithLogo({
     const clamped = Math.max(0, Math.min(el.duration, value));
     el.currentTime = clamped;
     setCurrentTime(clamped);
+  }, []);
+
+  /* ── Sync external timelineTime to video element ──────────────────────
+   * When the Timeline's playhead is dragged, App.jsx updates currentTime
+   * and passes it down as `timelineTime`. This effect seeks the video to
+   * match, providing smooth scrubbing in real time.
+   * ─────────────────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const el = videoRef.current;
+    if (timelineTime === undefined || timelineTime === null) return;
+    if (!el || !el.duration) {
+      // Video not ready yet — stash the time so we can seek once metadata loads
+      lastExternalTimeRef.current = timelineTime;
+      return;
+    }
+    // Avoid re-seeking if the time hasn't changed meaningfully (prevents
+    // feedback loops when the video's own timeupdate fires).
+    if (lastExternalTimeRef.current !== null &&
+        Math.abs(timelineTime - lastExternalTimeRef.current) < 0.01) {
+      return;
+    }
+    const clamped = Math.max(0, Math.min(el.duration, timelineTime));
+    if (Math.abs(el.currentTime - clamped) > 0.01) {
+      el.currentTime = clamped;
+    }
+    lastExternalTimeRef.current = timelineTime;
+  }, [timelineTime]);
+
+  /* ── Also seek on loadedmetadata if a pending external time exists ──── */
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const onMeta = () => {
+      if (lastExternalTimeRef.current !== null && el.duration) {
+        const clamped = Math.max(0, Math.min(el.duration, lastExternalTimeRef.current));
+        if (Math.abs(el.currentTime - clamped) > 0.01) {
+          el.currentTime = clamped;
+        }
+      }
+    };
+    el.addEventListener('loadedmetadata', onMeta);
+    return () => el.removeEventListener('loadedmetadata', onMeta);
   }, []);
 
   /* ── Sync volume / muted state to <video> element ──────────────────────── */
