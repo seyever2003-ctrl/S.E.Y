@@ -1,10 +1,23 @@
 /**
  * Local Translation Service (Browser-based)
  * Uses Transformers.js with NLLB-200 to translate text to Khmer entirely
- * in the browser via a Web Worker (importScripts) — CSP-compatible.
+ * in the browser via a Web Worker (ES Module) — CSP-compatible.
+ *
+ * ═══ Module Worker Architecture ═══
+ * The worker file (public/transformers/translation.worker.js) is loaded
+ * as { type: 'module' } and uses standard import statements to load
+ * Transformers.js — NOT importScripts(). This avoids the "Unexpected token
+ * export" error that occurs when importScripts() tries to load an ES module.
+ *
+ * All Transformers / ONNX Runtime files are referenced by public path strings
+ * (e.g. /transformers/transformers.min.js), keeping them outside Vite's
+ * build system.
+ *
  * Model: Xenova/nllb-200-distilled-600M (~350 MB, cached after first load).
  */
-var WORKER_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
+
+// Path to the ES Module worker — served from public/ as a static asset.
+var WORKER_URL = '/transformers/translation.worker.js';
 var TRANSLATION_MODEL = 'Xenova/nllb-200-distilled-600M';
 var LANGUAGE_MAP = {
   en: { name: 'English', code: 'eng_Latn' },
@@ -22,65 +35,27 @@ var workerReady = null;
 function isWorkerSupported() {
   try {
     if (typeof Worker === 'undefined') return false;
-    var b = new Blob(['self.postMessage("ok")'], { type: 'application/javascript' });
-    var u = URL.createObjectURL(b);
-    var w = new Worker(u);
-    URL.revokeObjectURL(u);
-    w.terminate();
+    new Worker('data:text/javascript;charset=utf-8,self.postMessage("ok")', { type: 'module' });
     return true;
   } catch (e) { return false; }
 }
 
 async function getTranslationWorker(onLog, signal) {
   if (workerInstance && workerReady) return workerInstance;
-  if (!isWorkerSupported()) throw new Error('Web Workers not supported. Use a modern browser or check CSP settings.');
+  if (!isWorkerSupported()) throw new Error('ES Module Workers not supported. Use a modern browser.');
   if (workerInstance) { try { workerInstance.worker.terminate(); } catch {} workerInstance = null; workerReady = null; }
   onLog?.('Starting translation engine in background worker...');
-  onLog?.('Loading Translation model (' + TRANSLATION_MODEL + ') from CDN...');
+  onLog?.('Loading Translation model (' + TRANSLATION_MODEL + ')...');
   onLog?.('First load downloads ~350 MB. Subsequent loads use browser cache.');
-  var wc = [
-    'var URL=' + JSON.stringify(WORKER_SCRIPT_URL) + ';',
-    'importScripts(URL);',
-    'if(!self.transformers){self.postMessage({status:"error",error:"Transformers.js failed to load from CDN."});return;}',
-    'var pipe=null;var ready=false;',
-    'async function init(){',
-    '  try{',
-    '    if(!self.transformers){throw new Error("self.transformers is null");}',
-    '    var p=null;',
-    '    if(typeof self.transformers.pipeline==="function"){p=self.transformers.pipeline;}',
-    '    else if(self.transformers.default&&typeof self.transformers.default.pipeline==="function"){p=self.transformers.default.pipeline;}',
-    '    else{throw new Error("Transformers.js pipeline() not found.");}',
-    '    var env=self.transformers.env||self.transformers.default?.env;',
-    '    if(env){env.allowLocalModel=false;env.useBrowserCache=true;}',
-    '    self.postMessage({status:"loading",message:"Loading translation model (NLLB-200)..."});',
-    '    pipe=await p("translation",' + JSON.stringify(TRANSLATION_MODEL) + ',{quantized:true});',
-    '    if(!pipe){throw new Error("pipeline() returned null");}',
-    '    ready=true;',
-    '    self.postMessage({status:"ready"});',
-    '  }catch(e){self.postMessage({status:"error",error:e.message||String(e)});}',
-    '}',
-    'init();',
-    'self.onmessage=async function(e){',
-    '  if(!ready){self.postMessage({status:"error",error:"Worker not ready."});return;}',
-    '  var d=e.data;',
-    '  if(!d||!d.text){self.postMessage({status:"error",error:"No text for translation."});return;}',
-    '  try{',
-    '    var src=d.srcLang||"eng_Latn";',
-    '    var r=await pipe(d.text,{src_lang:src,tgt_lang:' + JSON.stringify(TARGET_CODE) + ',max_length:512});',
-    '    if(!r||!r[0]){throw new Error("Translation returned empty result.");}',
-    '    var t=r[0].translation_text||r[0].generated_text||"";',
-    '    self.postMessage({status:"complete",text:t});',
-    '  }catch(e){self.postMessage({status:"error",error:e.message||String(e)});}',
-    '};',
-  ].join('\n');
-  var blob = new Blob([wc], { type: 'application/javascript' });
-  var blobUrl = URL.createObjectURL(blob);
-  var worker = new Worker(blobUrl);
-  var inst = { worker: worker, blobUrl: blobUrl };
+
+  // Create module worker from public path string
+  var worker = new Worker(WORKER_URL, { type: 'module' });
+  var inst = { worker: worker };
+
   var readyP = new Promise(function (resolve, reject) {
     var t = setTimeout(function () {
       worker.terminate();
-      reject(new Error('Translation model download timed out after 300s. Check your internet connection.'));
+      reject(new Error('Translation model download timed out after 300s. Check your internet connection and ensure huggingface.co is accessible.'));
     }, 300000);
     worker.onmessage = function (m) {
       var d = m.data;
@@ -91,12 +66,15 @@ async function getTranslationWorker(onLog, signal) {
     };
     worker.onerror = function (e) { clearTimeout(t); reject(new Error('Worker error: ' + (e.message || 'Unknown error'))); };
   });
+
+  // Send load command to worker
+  worker.postMessage({ command: 'load' });
+
   try {
     workerInstance = await readyP;
     workerReady = true;
     return workerInstance;
   } catch (err) {
-    URL.revokeObjectURL(blobUrl);
     worker.terminate();
     workerInstance = null;
     workerReady = null;

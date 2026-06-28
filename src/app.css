@@ -25,6 +25,10 @@
   --accent-glow: rgba(124, 58, 237, 0.25);
   --accent-glow-strong: rgba(124, 58, 237, 0.4);
 
+  /* Topbar button background — deep purple gradient (matches Text Editor button) */
+  --btn-bg: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  --btn-border: var(--accent-primary);
+
   --success: #4ade80;
   --warning: #fbbf24;
   --error: #ef4444;
@@ -118,11 +122,161 @@
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-right: 12px;
+  gap: 8px;
+  margin-right: 16px;
 }
 
 .topbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  background: var(--btn-bg);
+  color: #fff;
+  cursor: pointer;
+  user-select: none;
+  -webkit-app-region: no-drag;
+  position: relative;
+
+  /* Smooth transitions for all interactive states */
+  transition:
+    filter 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.3s ease;
+}
+
+.topbar-btn:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 20px var(--accent-glow-strong);
+  transform: scale(1.06);
+}
+
+.topbar-btn:active {
+  filter: brightness(0.9);
+  transform: scale(0.95);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.topbar-btn svg {
+  display: block;
+  flex-shrink: 0;
+  transition: color 0.3s ease, transform 0.3s ease;
+}
+
+.topbar-btn.active {
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+/* ── Settings Dropdown (topbar gear icon) ──────────────────────────────── */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding-top: 52px; /* sits just below the topbar */
+  pointer-events: auto;
+}
+
+.settings-dropdown {
+  width: 320px;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  margin-right: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+
+.settings-dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-dropdown-close {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-dropdown-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-dropdown-body {
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-dropdown-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-dropdown-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.settings-dropdown-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-dropdown-input {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.settings-dropdown-input:focus {
+  border-color: var(--border-focus);
+}
+
+.settings-dropdown-input::placeholder {
+  color: var(--text-muted);
+}
+
+.settings-dropdown-key-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -133,31 +287,20 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
-  -webkit-app-region: no-drag;
-  user-select: none;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
-.topbar-btn:hover {
+.settings-dropdown-key-toggle:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--border-medium);
 }
 
-.topbar-btn:active {
-  background: var(--bg-active);
-  transform: scale(0.95);
-}
-
-.topbar-btn svg {
-  display: block;
-  flex-shrink: 0;
-}
-
-.topbar-btn.active {
-  background: var(--accent-primary);
-  color: #fff;
-  border-color: var(--accent-primary);
+.settings-dropdown-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
 /* ── Text Editor Sidebar Section ─────────────────────────────────────── */
@@ -1377,6 +1520,29 @@
   line-height: 1.4;
 }
 
+/* ── Caption Panel — API Key Status ───────────────────────────────────── */
+
+.caption-api-key-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 8px;
+  padding: 5px 6px;
+  font-size: 8px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  line-height: 1.4;
+}
+
+.caption-api-key-status svg {
+  flex-shrink: 0;
+  color: var(--accent-secondary);
+}
+
+/* ── Caption Panel — Error ────────────────────────────────────────────── */
+
 .caption-error {
   margin-bottom: 4px;
   padding: 5px 6px;
@@ -1403,6 +1569,120 @@
   font-size: 8px;
   color: var(--text-muted);
   line-height: 1.3;
+}
+
+/* ── Caption Panel — Provider Row ────────────────────────────────────────── */
+
+.caption-provider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.caption-provider-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 52px;
+}
+
+.caption-provider-select {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 9px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.caption-provider-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Caption Panel — API Key Row ─────────────────────────────────────────── */
+
+.caption-api-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.caption-api-key-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 52px;
+}
+
+.caption-api-key-input-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.caption-api-key-input {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 9px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.caption-api-key-input:focus {
+  border-color: var(--accent);
+}
+
+.caption-api-key-input:disabled {
+  opacity: 0.5;
+}
+
+.caption-key-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.caption-key-toggle-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* ── Caption Panel — Provider Hint ───────────────────────────────────────── */
+
+.caption-provider-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0 0 6px 0;
+  font-size: 8px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.caption-provider-hint svg {
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 

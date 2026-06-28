@@ -105,7 +105,16 @@ export async function generateWithGemini(text, apiKey, opts = {}) {
   const candidate = data.candidates?.[0];
   if (!candidate) throw new Error('Gemini returned no response candidates');
 
-  const responseText = candidate.content?.parts?.[0]?.text?.trim();
+  // Search all parts for text content, ignoring non-text parts (inlineData, image_url, etc.)
+  let responseText = '';
+  if (candidate.content?.parts && Array.isArray(candidate.content.parts)) {
+    for (const part of candidate.content.parts) {
+      if (part.text) {
+        responseText = part.text.trim();
+        break;
+      }
+    }
+  }
   if (!responseText) throw new Error('Gemini returned empty response');
 
   if (candidate.finishReason && candidate.finishReason !== 'STOP') {

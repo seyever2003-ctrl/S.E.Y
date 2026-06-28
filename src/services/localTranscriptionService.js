@@ -2,16 +2,17 @@
  * Local Transcription Service (Browser-based)
  *
  * Uses Transformers.js with Whisper models to transcribe audio
- * entirely in the browser via a dedicated Web Worker. The Worker loads
- * Transformers.js via importScripts() which runs ONNX Runtime's webpack
- * initialization correctly outside Vite's module graph, avoiding the
- * "registerBackend" null-reference error.
+ * entirely in the browser via a dedicated Web Worker (ES Module).
  *
- * CRITICAL NULL-SAFETY FIXES:
- * - Added null-check for `self.transformers` before accessing `.pipeline`
- * - Added `registerBackend` null-guard in worker initialization
- * - Added retry logic for worker loading failures
- * - Added `wasm-unsafe-eval` support for ONNX Runtime's WebAssembly backend
+ * ═══ Module Worker Architecture ═══
+ * The worker file (public/transformers/transcription.worker.js) is loaded
+ * as { type: 'module' } and uses standard import statements to load
+ * Transformers.js — NOT importScripts(). This avoids the "Unexpected token
+ * export" error that occurs when importScripts() tries to load an ES module.
+ *
+ * All Transformers / ONNX Runtime files are referenced by public path strings
+ * (e.g. /transformers/transformers.min.js), keeping them outside Vite's
+ * build system and eliminating "Failed to load url" / CSP errors.
  *
  * Model is downloaded once (~150-500 MB) and cached by the browser.
  *
@@ -20,10 +21,9 @@
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 
-// The UMD bundle of Transformers.js is loaded via importScripts() in a Worker.
-// importScripts() runs scripts as plain JS (not ES modules), which allows
-// ONNX Runtime's webpack-based initialization to complete successfully.
-var WORKER_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
+// Path to the ES Module worker — served from public/ as a static asset.
+// Vite does not process it; it's loaded by the browser as a native module worker.
+var WORKER_URL = '/transformers/transcription.worker.js';
 
 // ── Web Worker Transcriber ─────────────────────────────────────────────────────
 
@@ -31,19 +31,13 @@ var workerInstance = null;
 var workerReady = null;
 
 /**
- * Check if a Web Worker can be created (environment support).
- * Some restrictive CSPs or older browsers may block blob: workers.
+ * Check if Module Workers are supported in this environment.
  */
 function isWorkerSupported() {
   try {
-    // Test basic Worker support
     if (typeof Worker === 'undefined') return false;
-    // Test blob URL support
-    var testBlob = new Blob(['self.postMessage("ok")'], { type: 'application/javascript' });
-    var testUrl = URL.createObjectURL(testBlob);
-    var testWorker = new Worker(testUrl);
-    URL.revokeObjectURL(testUrl);
-    testWorker.terminate();
+    // Quick test: module worker constructor exists
+    new Worker('data:text/javascript;charset=utf-8,self.postMessage("ok")', { type: 'module' });
     return true;
   } catch (e) {
     return false;
@@ -52,22 +46,21 @@ function isWorkerSupported() {
 
 /**
  * Get (or create) the Web Worker for transcription.
- * The worker creates itself dynamically as a blob URL to avoid Vite processing.
- * Includes null-guards for Transformers.js and ONNX Runtime initialization.
+ * Loads the standalone module worker from public/ via path string.
  *
  * @param {'tiny'|'base'|'small'} size - Whisper model size
  * @param {Function} [onLog] - Log callback
  * @param {object} [signal] - Optional AbortSignal
- * @returns {Promise<{worker: Worker, blobUrl: string}>} Worker interface
+ * @returns {Promise<{worker: Worker}>} Worker interface
  */
 async function getWorker(size, onLog, signal) {
   if (workerInstance && workerReady) return workerInstance;
 
-  // Check worker support first
+  // Check module worker support
   if (!isWorkerSupported()) {
     throw new Error(
-      'Web Workers are not supported in this environment. ' +
-      'Please use a modern browser (Chrome, Firefox, Edge) or check your CSP settings.'
+      'ES Module Workers are not supported in this environment. ' +
+      'Please use a modern browser (Chrome 80+, Firefox 113+, Edge 80+).'
     );
   }
 
@@ -79,62 +72,26 @@ async function getWorker(size, onLog, signal) {
   }
 
   onLog?.('Starting AI engine in background worker...');
-  onLog?.('Loading Transformers.js from CDN (first load may take a moment)...');
+  onLog?.('Loading Transformers.js engine...');
 
-  // Build worker code as a string to avoid Vite bundling.
-  // Includes null-checks for registerBackend and pipeline.
-  var workerCode = [
-    'var URL=' + JSON.stringify(WORKER_SCRIPT_URL) + ';',
-    'importScripts(URL);',
-    '',
-    '// FIX: Null-guard for Transformers.js initialization',
-    'if(!self.transformers){',
-    '  self.postMessage({status:"error",error:"Transformers.js failed to initialize (self.transformers is null). Check network/CDN access."});',
-    '  return;',
-    '}',
-    '',
-    '// FIX: Null-guard for registerBackend',
-    'var _pipeline=self.transformers.pipeline;',
-    'if(typeof _pipeline!=="function"){',
-    '  self.postMessage({status:"error",error:"Transformers.js pipeline() is not a function. ONNX Runtime registerBackend may have failed."});',
-    '  return;',
-    '}',
-    '',
-    'self.onmessage=async function(e){',
-    '  var m=e.data;',
-    '  try{',
-    '    if(m.command==="load"){',
-    '      self.postMessage({status:"log",text:"Creating Whisper "+m.modelSize+" pipeline..."});',
-    '      var p=await _pipeline("automatic-speech-recognition","Xenova/whisper-"+m.modelSize,{quantized:true});',
-    '      self.__p=p;',
-    '      self.postMessage({status:"ready"});',
-    '    }else if(m.command==="transcribe"){',
-    '      if(!self.__p){self.postMessage({status:"error",error:"Whisper model not loaded. Call load first."});return;}',
-    '      self.postMessage({status:"progress",value:0.3});',
-    '      var r=await self.__p(m.audioData,{chunk_length_s:12,stride_length_s:2,return_timestamps:true,task:"transcribe",language:m.language||void 0});',
-    '      self.postMessage({status:"done",chunks:r.chunks||null,text:r.text||""});',
-    '    }',
-    '  }catch(e){self.postMessage({status:"error",error:e.message})}',
-    '};',
-  ].join('\n');
-
-  var blob = new Blob([workerCode], { type: 'application/javascript' });
-  var blobUrl = URL.createObjectURL(blob);
-
-  var worker = new Worker(blobUrl);
+  // ── Create module worker from public path string ─────────────────────
+  // No blob URL needed. The worker file is a native ES module served as a
+  // static asset from public/. It uses `import` to load Transformers.js.
+  var worker = new Worker(WORKER_URL, { type: 'module' });
   var timeoutId;
 
   workerReady = new Promise(function(resolve, reject) {
     timeoutId = setTimeout(function() {
       worker.terminate();
       reject(new Error('Worker init timed out (120s). Model download interrupted. ' +
-        'Check your internet connection and ensure CDN (cdn.jsdelivr.net, huggingface.co) is accessible.'));
+        'Check your internet connection and ensure huggingface.co is accessible.'));
     }, 120000);
 
     worker.onmessage = function(e) {
       var msg = e.data;
       if (msg.status === 'ready') { clearTimeout(timeoutId); resolve(); }
       else if (msg.status === 'log') { onLog?.(msg.text); }
+      else if (msg.status === 'loading') { onLog?.('⏳ ' + (msg.message || 'Loading model...')); }
       else if (msg.status === 'error') { clearTimeout(timeoutId); reject(Error(msg.error)); }
     };
     worker.onerror = function(err) {
@@ -147,7 +104,7 @@ async function getWorker(size, onLog, signal) {
 
   await workerReady;
 
-  workerInstance = { worker: worker, blobUrl: blobUrl };
+  workerInstance = { worker: worker };
   onLog?.('AI engine worker ready.');
   return workerInstance;
 }
@@ -230,13 +187,13 @@ export async function transcribeLocally(audioBlob, opts) {
 
   onLog?.('Starting local transcription engine...');
 
-  // Step 1: Load the worker (loads Transformers.js via importScripts from CDN)
+  // Step 1: Load the module worker (uses dynamic import for Transformers.js from CDN)
   var workerApi;
   try {
     workerApi = await getWorker(modelSize, onLog, signal);
   } catch (initErr) {
     onLog?.('ERROR: ' + initErr.message);
-    onLog?.('Check F12 > Console. Ad-blockers or firewalls may block CDN downloads.');
+    onLog?.('Check F12 > Console for details.');
     throw initErr;
   }
   if (signal?.aborted) throw new DOMException('Transcription cancelled', 'AbortError');

@@ -15,18 +15,22 @@ export default function VideoUploader({ onVideoLoaded, disabled, hideVideoPrevie
   const [videoMeta, setVideoMeta] = useState(null);
   const [error, setError] = useState('');
 
-  const readVideoMeta = useCallback((file, url) => {
+  const readVideoMeta = useCallback((file, mainUrl) => {
     const video = document.createElement('video');
     video.preload = 'metadata';
+    // Create a SEPARATE blob URL for the temp metadata reader so that
+    // revoking it does NOT affect the URL used by the main video player.
+    const tempUrl = URL.createObjectURL(file);
     video.onloadedmetadata = () => {
       setVideoMeta({ duration: video.duration, width: video.videoWidth, height: video.videoHeight, size: file.size, type: file.type || 'video/mp4' });
       video.src = '';
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(tempUrl);
     };
     video.onerror = () => {
       setVideoMeta({ duration: 0, width: 0, height: 0, size: file.size, type: file.type || 'video/mp4' });
+      URL.revokeObjectURL(tempUrl);
     };
-    video.src = url;
+    video.src = tempUrl;
   }, []);
 
   const handleFile = useCallback((file) => {

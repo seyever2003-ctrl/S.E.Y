@@ -113,6 +113,28 @@ async function translateWithGemini(srtText, apiKey, opts) {
   return result;
 }
 
+/**
+ * Safely extract text from an OpenAI-compatible chat completion response content.
+ *
+ * Handles both plain string content and array-of-parts content
+ * (e.g. [{ type: 'text', text: '...' }, { type: 'image_url', image_url: { url } }]).
+ *
+ * @param {string|Array|null|undefined} content
+ * @returns {string} Extracted text, trimmed.
+ */
+function extractContentText(content) {
+  if (!content) return '';
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .filter(function (part) { return part.type === 'text' && part.text; })
+      .map(function (part) { return part.text; })
+      .join(' ')
+      .trim();
+  }
+  return '';
+}
+
 async function translateWithOpenAI(srtText, apiKey, opts) {
   var sourceLang = opts.sourceLang;
   var targetLang = opts.targetLang;
@@ -149,7 +171,7 @@ async function translateWithOpenAI(srtText, apiKey, opts) {
   }
 
   var data = await res.json();
-  var text = data.choices?.[0]?.message?.content?.trim();
+  var text = extractContentText(data.choices?.[0]?.message?.content);
   if (!text) throw new Error('OpenAI returned empty response');
   return text;
 }

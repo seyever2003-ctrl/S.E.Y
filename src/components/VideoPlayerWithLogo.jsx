@@ -1,14 +1,24 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Play, Pause, RotateCcw, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, RotateCcw, SkipForward, Volume2, VolumeX, RefreshCw } from 'lucide-react';
 import './LogoOverlay.css';
+import { createVideoStream, shouldStreamFile, isMediaSourceSupported } from '../services/videoStreamService.js';
 
 /**
  * VideoPlayerWithLogo — A compact video player that hosts the logo/image overlay
  * directly on the video element, with live drag-and-drop and resize,
  * plus a custom styled control bar at the bottom.
+ *
+ * When `videoFile` is provided, the component uses the MediaSource API to
+ * stream the file in chunks (512 KB) rather than loading the entire file
+ * into memory via a blob: URL. This prevents out-of-memory crashes on
+ * mobile browsers (Chrome for Android) with large video files.
+ *
+ * Auto-retry: if the video errors mid-playback, the component automatically
+ * re-initializes the stream up to 3 times with exponential backoff.
  */
 export default function VideoPlayerWithLogo({
   videoPreviewUrl,
+  videoFile,
   logoPreviewUrl,
   logoX = 90,
   logoY = 90,
@@ -23,12 +33,19 @@ export default function VideoPlayerWithLogo({
   overlayDirection = 'bottom-to-top',
   overlaySpeed = 5,
   overlayOpacity = 1.0,
+  /* ── Subtitles ────────────────────────────────────────────────── */
+  subtitles = [],       // array of {id, start, end, text} — the transcribed & translated segments
 }) {
   const stageRef = useRef(null);
   const videoRef = useRef(null);
   const dragRef = useRef(null);
   const resizeRef = useRef(null);
-  const seekingRef = useRef(false);       // tracks seek without re-renders
+  const seekingRef = useRef(false);
+  const streamRef = useRef(null);       // holds active MediaSource stream
+  const retryCountRef = useRef(0);      // tracks retry attempts
+  const retryTimerRef = useRef(null);   // holds setTimeout for retry
+  const subtitlesRef = useRef([]);      // latest subtitles (avoids re-attaching events on every change)
+  const MAX_RETRIES = 3;
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -37,6 +54,8 @@ export default function VideoPlayerWithLogo({
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [useStreaming, setUseStreaming] = useState(false); // whether we are using MediaSource
+  const [activeSubtitle, setActiveSubtitle] = useState(''); // current subtitle text to display
 
   /* ── Sync play state + time with video events ──────────────────────── */
   useEffect(() => {
@@ -62,7 +81,24 @@ export default function VideoPlayerWithLogo({
     };
     const onTimeUpdate = () => {
       if (seekingRef.current) return; // skip while user is dragging seek bar
-      setCurrentTime(el.currentTime);
+      var time = el.currentTime;
+      setCurrentTime(time);
+
+      // ── Find active subtitle ────────────────────────────────────────────
+      // Check if any subtitle segment matches the current playback time.
+      // Subtitles are stored in subtitlesRef (kept in sync via a separate effect).
+      var subs = subtitlesRef.current;
+      if (subs && subs.length > 0) {
+        var found = '';
+        for (var si = 0; si < subs.length; si++) {
+          var seg = subs[si];
+          if (time >= seg.start && time < seg.end) {
+            found = seg.text || '';
+            break;
+          }
+        }
+        setActiveSubtitle(found);
+      }
     };
     const onLoadedMeta = () => {
       const d = el.duration || 0;
@@ -140,6 +176,106 @@ export default function VideoPlayerWithLogo({
     seekingRef.current = false;
   }, [videoPreviewUrl]);
 
+  /* ── MediaSource streaming initialization ──────────────────────────────
+   * When a videoFile is provided, use chunked streaming instead of blob URL
+   * to avoid loading the entire file into memory at once.
+   * ─────────────────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !videoFile || !videoPreviewUrl) {
+      // No file to stream — fall back to regular blob URL
+      setUseStreaming(false);
+      return;
+    }
+
+    // Decide whether streaming is beneficial / supported
+    const canStream = isMediaSourceSupported() && shouldStreamFile(videoFile);
+    if (!canStream) {
+      console.log('[VideoPlayer] MediaSource streaming not needed/available — using blob URL');
+      setUseStreaming(false);
+      return;
+    }
+
+    console.log('[VideoPlayer] Initializing MediaSource streaming for', videoFile.name, '(' + (videoFile.size / 1024 / 1024).toFixed(1) + ' MB)');
+    setUseStreaming(true);
+
+    // Destroy any previous stream
+    if (streamRef.current) {
+      streamRef.current.destroy();
+      streamRef.current = null;
+    }
+
+    // Reset retry counter for new source
+    retryCountRef.current = 0;
+
+    function initStream() {
+      // Clear the video src first so MediaSource can take over
+      el.src = '';
+      el.load();
+
+      var stream = createVideoStream(el, videoFile, {
+        chunkSize: 512 * 1024, // 512 KB chunks
+        mimeType: videoFile.type || 'video/mp4',
+        onError: function onStreamError(err) {
+          console.error('[VideoPlayer] MediaSource stream error:', err.message);
+
+          // Auto-retry with exponential backoff (up to MAX_RETRIES)
+          if (retryCountRef.current < MAX_RETRIES) {
+            retryCountRef.current += 1;
+            var delay = Math.min(1000 * Math.pow(2, retryCountRef.current - 1), 8000);
+            console.log('[VideoPlayer] Retrying stream in ' + delay + 'ms (attempt ' + retryCountRef.current + '/' + MAX_RETRIES + ')');
+            setVideoError('Video error — retrying (' + retryCountRef.current + '/' + MAX_RETRIES + ')...');
+
+            retryTimerRef.current = setTimeout(function () {
+              if (streamRef.current) {
+                streamRef.current.destroy();
+                streamRef.current = null;
+              }
+              initStream();
+            }, delay);
+          } else {
+            console.error('[VideoPlayer] Max retries reached — giving up');
+            setVideoError('Video error — please try reloading the file');
+          }
+        },
+        onEnded: function onStreamEnded() {
+          console.log('[VideoPlayer] MediaSource stream ended');
+        },
+      });
+
+      streamRef.current = stream;
+      stream.start();
+    }
+
+    initStream();
+
+    return () => {
+      // Cleanup on unmount or source change
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      if (streamRef.current) {
+        streamRef.current.destroy();
+        streamRef.current = null;
+      }
+      // Restore the regular blob URL for the video element so it can be
+      // used as a fallback by other components
+      if (el && videoPreviewUrl && !videoFile) {
+        el.src = videoPreviewUrl;
+      }
+    };
+  }, [videoFile, videoPreviewUrl]);
+
+  /* ── Keep subtitles ref in sync with prop ────────────────────────────
+   * We use a ref instead of directly reading subtitles from the closure
+   * in onTimeUpdate to avoid having to re-attach event listeners every
+   * time the subtitles array changes.
+   * ─────────────────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    subtitlesRef.current = subtitles;
+  }, [subtitles]);
+
   /* ── Seek to absolute position ─────────────────────────────────────── */
   const handleSeek = useCallback((e) => {
     const el = videoRef.current;
@@ -209,6 +345,45 @@ export default function VideoPlayerWithLogo({
       setIsPlaying(false);
     });
   }, [isMuted, volume]);
+
+  /* ── Manual retry handler (for user-initiated retry button) ────────── */
+  const handleRetry = useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+
+    console.log('[VideoPlayer] Manual retry triggered');
+    setVideoError(null);
+    retryCountRef.current = 0;
+
+    // Clean up existing stream
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.destroy();
+      streamRef.current = null;
+    }
+
+    // Reinitialize with blob URL (simplest recovery)
+    if (videoFile && isMediaSourceSupported() && shouldStreamFile(videoFile)) {
+      // Re-trigger the streaming effect by clearing src and letting the
+      // effect re-run (it will see videoFile still set and re-init)
+      el.src = '';
+      el.load();
+      // We set a small timeout to let the effect pick up the changes
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.src = videoPreviewUrl || '';
+          videoRef.current.load();
+        }
+      }, 50);
+    } else {
+      // Fallback: just reset the blob URL
+      el.src = videoPreviewUrl || '';
+      el.load();
+    }
+  }, [videoFile, videoPreviewUrl]);
 
   /* ── Seek relative (seconds) ───────────────────────────────────────── */
   const seekRelative = useCallback((delta) => {
@@ -410,7 +585,7 @@ export default function VideoPlayerWithLogo({
             loop
             playsInline
             controls={false}
-            preload="auto"
+            preload="metadata"
           />
         ) : (
           <div className="preview-display-placeholder">
@@ -429,7 +604,7 @@ export default function VideoPlayerWithLogo({
           </div>
         )}
 
-        {/* Video error overlay */}
+        {/* Video error overlay — now includes error details + retry button */}
         {videoPreviewUrl && videoError && (
           <div className="preview-error-overlay">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -437,7 +612,15 @@ export default function VideoPlayerWithLogo({
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            <span>Video error</span>
+            <span className="preview-error-text">{videoError}</span>
+            <button
+              className="preview-retry-btn"
+              onClick={handleRetry}
+              title="Retry video playback"
+            >
+              <RefreshCw size={14} />
+              <span>{useStreaming ? 'Reconnect stream' : 'Retry'}</span>
+            </button>
           </div>
         )}
 
@@ -451,6 +634,15 @@ export default function VideoPlayerWithLogo({
                 Your browser requires a user interaction to start playback with sound.
               </span>
             </div>
+          </div>
+        )}
+
+        {/* ── Subtitle overlay (bottom of video) ────────────────────────── */}
+        {/* Shows the current subtitle text synced with video.currentTime.
+            Renders only when there are subtitles and one is active. */}
+        {videoPreviewUrl && activeSubtitle && subtitles.length > 0 && (
+          <div className="preview-subtitle-overlay">
+            <span className="preview-subtitle-text">{activeSubtitle}</span>
           </div>
         )}
 

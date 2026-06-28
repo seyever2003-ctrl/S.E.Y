@@ -14,14 +14,14 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'credentialless',
       'Content-Security-Policy':
         "default-src 'self';" +
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://huggingface.co; " +
-        "worker-src 'self' blob: https://cdn.jsdelivr.net https://huggingface.co; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://huggingface.co https://unpkg.com; " +
+        "worker-src 'self' blob: https://huggingface.co https://unpkg.com; " +
         "style-src 'self' 'unsafe-inline'; " +
         "connect-src 'self' blob: data: " +
-          "https://cdn.jsdelivr.net https://huggingface.co " +
+          "https://huggingface.co https://unpkg.com " +
           "https://api.openai.com https://generativelanguage.googleapis.com " +
           "https://texttospeech.googleapis.com https://storage.googleapis.com " +
-          "https://www.googleapis.com wss://*; " +
+          "https://www.googleapis.com https://api.deepseek.com wss://*; " +
         "img-src 'self' blob: data: https://huggingface.co; " +
         "media-src 'self' blob:; " +
         "font-src 'self' data:;",
@@ -44,7 +44,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
-          ffmpeg: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
         },
       },
     },

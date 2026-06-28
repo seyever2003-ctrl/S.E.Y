@@ -7,6 +7,14 @@
  * The audio blob (from TTS) is mixed into the video as a new audio track.
  * If the video already has audio, it can be replaced or overlaid.
  *
+ * ═══ FFmpeg CDN Configuration ═══
+ * FFmpeg core WASM binaries are loaded from unpkg CDN instead of being
+ * bundled locally. This avoids Vite build errors ("Failed to load url")
+ * and Content Security Policy issues with WebAssembly files served from
+ * the public/ directory.
+ *
+ * Core URL: https://unpkg.com/@ffmpeg/core@{CORE_VERSION}/dist/esm/
+ *
  * Usage:
  *   import { mergeAudioVideo, getFFmpeg } from './videoMerger.js';
  *
@@ -17,9 +25,6 @@
  *   // Download: URL.createObjectURL(mergedBlob)
  */
 
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-
 // ── Singleton FFmpeg instance ─────────────────────────────────────────────────
 
 let ffmpeg = null;
@@ -27,8 +32,15 @@ let loaded = false;
 const CORE_VERSION = '0.12.10';
 
 /**
+ * CDN base URL for @ffmpeg/core WASM binaries.
+ * Using unpkg to avoid local file serving & Vite build errors.
+ */
+const CDN_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
+
+/**
  * Get (or create) the shared FFmpeg instance.
- * Loads the core WASM binaries on first call.
+ * Dynamically imports @ffmpeg/ffmpeg so Vite does not try to bundle it.
+ * Loads the core WASM binaries from unpkg CDN on first call.
  */
 export async function getFFmpeg(opts = {}) {
   if (ffmpeg && loaded) {
@@ -48,6 +60,8 @@ export async function getFFmpeg(opts = {}) {
   }
 
   if (!ffmpeg) {
+    // Dynamic import — Vite skips bundling @ffmpeg/ffmpeg, avoiding build errors
+    const { FFmpeg } = await import('@ffmpeg/ffmpeg');
     ffmpeg = new FFmpeg();
   }
 
@@ -60,13 +74,13 @@ export async function getFFmpeg(opts = {}) {
     ffmpeg.on('progress', ({ progress }) => onProgress(progress));
   }
 
-  const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@' + CORE_VERSION + '/dist/esm';
-
-  // FIX: Wrap load in try/catch for proper error handling
+  // ── Load core from unpkg CDN ──────────────────────────────────────────
+  // Previously these were served from public/ffmpeg/, which caused Vite
+  // build errors and CSP issues. Now loaded directly from unpkg CDN.
   try {
     await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      coreURL: `${CDN_BASE}/ffmpeg-core.js`,
+      wasmURL: `${CDN_BASE}/ffmpeg-core.wasm`,
     });
   } catch (loadErr) {
     ffmpeg = null;
@@ -127,6 +141,9 @@ export async function mergeAudioVideo(videoFile, audioBlob, opts = {}) {
   } = opts;
 
   const instance = await getFFmpeg({ onLog, onProgress });
+
+  // Dynamic import so Vite doesn't try to bundle @ffmpeg/util
+  const { fetchFile } = await import('@ffmpeg/util');
 
   // Determine file extensions for ffmpeg's virtual filesystem
   const videoExt = getFileExtension(videoFile.name || 'video.mp4');

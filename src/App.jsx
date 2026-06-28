@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Sun, Moon, Settings as SettingsIcon } from 'lucide-react';
 import Timeline from './components/Timeline.jsx';
 import ApiKeyPanel from './components/ApiKeyPanel.jsx';
 import GeminiPanel from './components/GeminiPanel.jsx';
@@ -7,6 +8,8 @@ import CaptionPanel from './components/CaptionPanel.jsx';
 import TranslatePanel from './components/TranslatePanel.jsx';
 import LogoOverlay from './components/LogoOverlay.jsx';
 import VideoPlayerWithLogo from './components/VideoPlayerWithLogo.jsx';
+
+import SettingsModal from './components/SettingsModal.jsx';
 import useLogoOverlay from './hooks/useLogoOverlay.js';
 import { synthesizeAll, decodeAll, clearCache, speakAllSegments, stopBrowserSpeech, getProvider, PROVIDERS } from './services/ttsService.js';
 import { mergeAudioVideo, isFFmpegLoaded, terminateFFmpeg } from './services/videoMerger.js';
@@ -35,6 +38,34 @@ export default function App() {
     document.documentElement.classList.toggle('light-theme', !darkMode);
     localStorage.setItem('appvro-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
+
+  const handleToggleTheme = useCallback(() => {
+    setDarkMode((prev) => !prev);
+  }, []);
+
+  // ── Settings modal state ─────────────────────────────────────────────
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const handleOpenSettings = useCallback(() => setShowSettingsModal(true), []);
+  const handleCloseSettings = useCallback(() => setShowSettingsModal(false), []);
+
+  // ── API Key state (persisted in localStorage) ────────────────────────
+  const [deepSeekApiKey, setDeepSeekApiKey] = useState(() => {
+    return localStorage.getItem('appvro-deepseek-key') || '';
+  });
+
+  const [deepgramApiKey, setDeepgramApiKey] = useState(() => {
+    return localStorage.getItem('appvro-deepgram-key') || '';
+  });
+
+  const handleApiKeyChange = useCallback((key) => {
+    setDeepSeekApiKey(key);
+    localStorage.setItem('appvro-deepseek-key', key);
+  }, []);
+
+  const handleDeepgramKeyChange = useCallback((key) => {
+    setDeepgramApiKey(key);
+    localStorage.setItem('appvro-deepgram-key', key);
+  }, []);
 
   // ── Text overlay state ───────────────────────────────────────────────
   const [showOverlaySettings, setShowOverlaySettings] = useState(false);
@@ -121,6 +152,11 @@ export default function App() {
 
   // ── Auto-Caption (Local STT + Translate to Khmer) ─────────────────────
   const handleCaptionsGenerated = useCallback((segments) => {
+    console.log('[App] handleCaptionsGenerated called with', segments.length, 'segments');
+    if (!segments || segments.length === 0) {
+      console.warn('[App] No segments received from CaptionPanel');
+      return;
+    }
     setSegments(segments);
     setCurrentSegmentIndex(-1);
     setIsPlaying(false);
@@ -320,25 +356,16 @@ export default function App() {
               onClick={() => setDarkMode(prev => !prev)}
               title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
-              {darkMode ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="5" />
-                  <line x1="12" y1="1" x2="12" y2="3" />
-                  <line x1="12" y1="21" x2="12" y2="23" />
-                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                  <line x1="1" y1="12" x2="3" y2="12" />
-                  <line x1="21" y1="12" x2="23" y2="12" />
-                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-              )}
+              {darkMode ? <Sun size={20} strokeWidth={1.75} /> : <Moon size={20} strokeWidth={1.75} />}
             </button>
 
+            <button
+              className="topbar-btn settings-btn"
+              onClick={handleOpenSettings}
+              title="Settings"
+            >
+              <SettingsIcon size={20} strokeWidth={1.75} />
+            </button>
           </div>
           <span className="topbar-version">v1.0.0</span>
         </div>
@@ -376,6 +403,8 @@ export default function App() {
               videoFile={videoFile}
               onCaptionsGenerated={handleCaptionsGenerated}
               disabled={!videoFile || isMerging}
+              deepSeekApiKey={deepSeekApiKey}
+              deepgramApiKey={deepgramApiKey}
             />
           </div>
 
@@ -651,6 +680,7 @@ export default function App() {
           <div className="main-video-section">
             <VideoPlayerWithLogo
               videoPreviewUrl={videoPreviewUrl}
+              videoFile={videoFile}
               logoPreviewUrl={logoPreviewUrl}
               logoX={logoX}
               logoY={logoY}
@@ -665,6 +695,7 @@ export default function App() {
               overlayDirection={overlayDirection}
               overlaySpeed={overlaySpeed}
               overlayOpacity={overlayOpacity}
+              subtitles={processedSegments.length > 0 ? processedSegments : segments}
             />
           </div>
 
@@ -720,6 +751,15 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <SettingsModal
+          deepSeekApiKey={deepSeekApiKey}
+          onApiKeyChange={handleApiKeyChange}
+          onClose={handleCloseSettings}
+        />
+      )}
     </div>
   );
 }
